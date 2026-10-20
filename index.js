@@ -22,6 +22,10 @@ app.use(express.json({ limit: '32kb' }));
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
 const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
 let queue = [], currentTrack = null, lastError = null, processing = false;
+let repeatMode = 'off'; // off | track | queue
+let autoplayEnabled = false, volumeLevel = 0.7, skipRequested = false;
+const history = [];
+const MAX_QUEUE = 200;
 const pendingSearches = new Map();
 const SEARCH_TIMEOUT_MS = 15000;
 const STREAM_TIMEOUT_MS = 25000;
@@ -33,7 +37,7 @@ function timeout(promise, ms, message) {
 }
 function getConnection() { return getVoiceConnection(GUILD_ID); }
 function publicTrack(t) { return t ? { title: t.title || 'Canción', url: t.url, duration: t.duration || '—', source: t.source || 'YouTube', thumbnail: t.thumbnail || null } : null; }
-function snapshot() { return { current: publicTrack(currentTrack), queue: queue.map(publicTrack), count: queue.length, paused: player.state.status === AudioPlayerStatus.Paused }; }
+function snapshot() { return { current: publicTrack(currentTrack), queue: queue.map((t, index) => ({ ...publicTrack(t), index })), count: queue.length, paused: player.state.status === AudioPlayerStatus.Paused, repeatMode, autoplayEnabled, volume: Math.round(volumeLevel * 100), history: history.slice(0, 10).map(publicTrack) }; }
 function requireApi(req, res, next) {
   const h = req.get('authorization') || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : '';
@@ -310,8 +314,10 @@ async function startNext() {
     if (!stream || !stream.stream) throw new Error('La fuente no devolvió un flujo de audio válido.');
     const resource = createAudioResource(stream.stream,{
       inputType: stream.type || StreamType.Arbitrary,
-      metadata: activeTrack
+      metadata: activeTrack,
+      inlineVolume: true
     });
+    resource.volume?.setVolume(volumeLevel);
     player.play(resource);
     lastError = null;
     console.log(`Reproduciendo: ${activeTrack.title} [${activeTrack.source || 'audio'}]`);
@@ -333,13 +339,31 @@ async function startNext() {
 }
 function addTracks(tracks) {
   if (!tracks.length) throw new Error('No hay canciones válidas para añadir.');
-  queue.push(...tracks);
+  const accepted = tracks.slice(0, Math.max(0, MAX_QUEUE - queue.length));
+  if (!accepted.length) throw new Error(`La cola alcanzó su límite de ${MAX_QUEUE} canciones.`);
+  queue.push(...accepted);
   if (!currentTrack && player.state.status === AudioPlayerStatus.Idle && !processing) setImmediate(startNext);
-  return { added: tracks.length, first: publicTrack(tracks[0]), snapshot: snapshot() };
+  return { added: accepted.length, first: publicTrack(accepted[0]), snapshot: snapshot() };
 }
 player.on(AudioPlayerStatus.Idle, () => {
-  if (currentTrack) currentTrack = null;
+  const finished = currentTrack;
+  if (finished) {
+    history.unshift(finished);
+    if (history.length > 20) history.length = 20;
+    if (repeatMode === 'track' && !skipRequested) queue.unshift(finished);
+    else if (repeatMode === 'queue' && !skipRequested) queue.push(finished);
+  }
+  skipRequested = false;
+  currentTrack = null;
   if (!processing && queue.length) setImmediate(startNext);
+  else if (!processing && autoplayEnabled && finished) {
+    const query = String(finished.title || '').replace(/\s*[—-]\s*(YouTube|SoundCloud).*$/i, '').trim();
+    if (query) setTimeout(async () => {
+      if (!autoplayEnabled || currentTrack || queue.length) return;
+      try { const found = await searchTracks(query); if (found.length) addTracks([found[0]]); }
+      catch (e) { lastError = `Autoplay: ${e.message}`; console.warn(lastError); }
+    }, 1200);
+  }
 });
 player.on('error', e => {
   lastError = `Error de audio: ${e.message}`; console.error(lastError); currentTrack = null;
@@ -353,7 +377,13 @@ const commands = [
   { name: 'play', description: 'Busca una canción y muestra sugerencias', options: [{ name: 'consulta', description: 'Nombre de canción o enlace de YouTube', type: 3, required: true }] },
   { name: 'pausa', description: 'Pausa la música' }, { name: 'reanudar', description: 'Reanuda la música' },
   { name: 'saltar', description: 'Salta la canción actual' }, { name: 'cola', description: 'Muestra la cola de canciones' },
-  { name: 'parar', description: 'Detiene la música y limpia la cola' }
+  { name: 'parar', description: 'Detiene la música y limpia la cola' },
+  { name: 'aleatorio', description: 'Mezcla las canciones en cola' },
+  { name: 'repetir', description: 'Cambia el modo de repetición', options: [{ name: 'modo', description: 'Qué repetir', type: 3, required: true, choices: [{name:'Desactivado',value:'off'},{name:'Canción actual',value:'track'},{name:'Toda la cola',value:'queue'}] }] },
+  { name: 'volumen', description: 'Ajusta el volumen del bot (0 a 100)', options: [{ name: 'nivel', description: 'Porcentaje de volumen', type: 4, required: true, min_value: 0, max_value: 100 }] },
+  { name: 'quitar', description: 'Quita una canción de la cola', options: [{ name: 'posicion', description: 'Número de la canción en la cola', type: 4, required: true, min_value: 1, max_value: 200 }] },
+  { name: 'limpiar', description: 'Vacía la cola sin detener la canción actual' },
+  { name: 'autoplay', description: 'Activa o desactiva la reproducción automática', options: [{ name: 'activo', description: 'Activar autoplay', type: 5, required: true }] }
 ];
 async function registerCommands() { const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN); await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands }); console.log('Comandos slash registrados.'); }
 
@@ -363,6 +393,14 @@ app.get('/app.js', (_req,res) => res.sendFile(path.join(__dirname, 'app.js')));
 app.get('/health', (_req,res) => res.status(200).json({ status: 'ok' }));
 app.get('/api/status', requireApi, (_req,res) => { const c = getConnection(); res.json({ online: client.isReady(), bot: client.user ? { id: client.user.id, username: client.user.username } : null, voice: c ? c.state.status : 'disconnected', playing: Boolean(currentTrack), paused: player.state.status === AudioPlayerStatus.Paused, lastError }); });
 app.get('/api/music/queue', requireApi, (_req,res) => res.json(snapshot()));
+app.post('/api/music/shuffle', requireApi, (_req,res) => { for (let i=queue.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1)); [queue[i],queue[j]]=[queue[j],queue[i]]; } res.json({ok:true,...snapshot()}); });
+app.post('/api/music/repeat', requireApi, (req,res) => { const mode=String(req.body?.mode||'off'); if(!['off','track','queue'].includes(mode)) return res.status(400).json({error:'Modo inválido. Usa off, track o queue.'}); repeatMode=mode; res.json({ok:true,repeatMode}); });
+app.post('/api/music/volume', requireApi, (req,res) => { const n=Number(req.body?.volume); if(!Number.isFinite(n)||n<0||n>100) return res.status(400).json({error:'El volumen debe estar entre 0 y 100.'}); volumeLevel=n/100; const resource=player.state.resource; if(resource?.volume) resource.volume.setVolume(volumeLevel); res.json({ok:true,volume:n}); });
+app.post('/api/music/autoplay', requireApi, (req,res) => { if(typeof req.body?.enabled!=='boolean') return res.status(400).json({error:'enabled debe ser true o false.'}); autoplayEnabled=req.body.enabled; res.json({ok:true,autoplayEnabled}); });
+app.post('/api/music/queue/shuffle', requireApi, (_req,res) => { for(let i=queue.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[queue[i],queue[j]]=[queue[j],queue[i]];} res.json({ok:true,...snapshot()}); });
+app.delete('/api/music/queue/:index', requireApi, (req,res) => { const index=Number(req.params.index); if(!Number.isInteger(index)||index<0||index>=queue.length) return res.status(404).json({error:'No existe esa posición en la cola.'}); const [removed]=queue.splice(index,1); res.json({ok:true,removed:publicTrack(removed),...snapshot()}); });
+app.post('/api/music/queue/clear', requireApi, (_req,res) => { const removed=queue.length; queue=[]; res.json({ok:true,removed,...snapshot()}); });
+app.post('/api/music/queue/move', requireApi, (req,res) => { const from=Number(req.body?.from), to=Number(req.body?.to); if(!Number.isInteger(from)||!Number.isInteger(to)||from<0||to<0||from>=queue.length||to>=queue.length) return res.status(400).json({error:'Posición de cola inválida.'}); const [track]=queue.splice(from,1); queue.splice(to,0,track); res.json({ok:true,...snapshot()}); });
 app.get('/api/music/search', requireApi, async (req,res) => { try { const q=String(req.query.q||''); const tracks=await searchTracks(q); const isPlaylist=/spotify\.com\/(playlist|album)\//i.test(q)||/youtube\.com\/playlist|[?&]list=/i.test(q); res.json({playlist:isPlaylist,results:tracks.slice(0,isPlaylist?100:10).map((t,i)=>({...publicTrack(t),id:String(i)}))}); } catch(e) { res.status(422).json({error:e.message||'Falló la búsqueda.'}); } });
 app.post('/api/music/play', requireApi, async (req,res) => {
   try {
@@ -381,8 +419,8 @@ app.post('/api/music/play', requireApi, async (req,res) => {
 });
 app.post('/api/music/pause', requireApi, (_req,res) => { const ok = player.pause(); res.status(ok ? 200 : 409).json(ok ? { ok:true, paused:true } : { error:'No hay música reproduciéndose.' }); });
 app.post('/api/music/resume', requireApi, (_req,res) => { const ok = player.unpause(); res.status(ok ? 200 : 409).json(ok ? { ok:true, paused:false } : { error:'No hay música pausada.' }); });
-app.post('/api/music/skip', requireApi, (_req,res) => { if (!currentTrack) return res.status(409).json({ error:'No hay canción actual.' }); player.stop(true); res.json({ ok:true, skipped:true }); });
-app.post('/api/music/stop', requireApi, (_req,res) => { queue=[]; currentTrack=null; processing=false; player.stop(true); res.json({ ok:true, stopped:true }); });
+app.post('/api/music/skip', requireApi, (_req,res) => { if (!currentTrack) return res.status(409).json({ error:'No hay canción actual.' }); skipRequested=true; player.stop(true); res.json({ ok:true, skipped:true }); });
+app.post('/api/music/stop', requireApi, (_req,res) => { queue=[]; currentTrack=null; processing=false; skipRequested=true; player.stop(true); res.json({ ok:true, stopped:true }); });
 
 client.once('ready', () => console.log(`Bot iniciado como ${client.user.tag}`));
 client.on('interactionCreate', async i => {
@@ -420,9 +458,15 @@ client.on('interactionCreate', async i => {
     }
     if (i.commandName === 'pausa') return i.editReply(player.pause()?'⏸️ Música pausada.':'No hay música reproduciéndose.');
     if (i.commandName === 'reanudar') return i.editReply(player.unpause()?'▶️ Música reanudada.':'No hay música pausada.');
-    if (i.commandName === 'saltar') return i.editReply(currentTrack && player.stop(true)?'⏭️ Canción saltada.':'No hay canción actual.');
+    if (i.commandName === 'saltar') { if(!currentTrack) return i.editReply('No hay canción actual.'); skipRequested=true; player.stop(true); return i.editReply('⏭️ Canción saltada.'); }
     if (i.commandName === 'cola') { const items=queue.slice(0,10).map((t,n)=>`${n+1}. ${t.title}`).join('\n'); return i.editReply({content:`**Ahora:** ${currentTrack?currentTrack.title:'Nada'}\n${items?`**Siguiente:**\n${items}`:'La cola está vacía.'}`}); }
-    if (i.commandName === 'parar') { queue=[];currentTrack=null;processing=false;player.stop(true);return i.editReply('⏹️ Música detenida y cola vaciada.'); }
+    if (i.commandName === 'parar') { queue=[];currentTrack=null;processing=false;skipRequested=true;player.stop(true);return i.editReply('⏹️ Música detenida y cola vaciada.'); }
+    if (i.commandName === 'aleatorio') { if(queue.length<2) return i.editReply('Añade al menos dos canciones para mezclar la cola.'); for(let n=queue.length-1;n>0;n--){const j=Math.floor(Math.random()*(n+1));[queue[n],queue[j]]=[queue[j],queue[n]];} return i.editReply(`🔀 Cola mezclada (${queue.length} canciones).`); }
+    if (i.commandName === 'repetir') { repeatMode=i.options.getString('modo',true); return i.editReply(`🔁 Repetición: **${({off:'desactivada',track:'canción actual',queue:'toda la cola'})[repeatMode]}**.`); }
+    if (i.commandName === 'volumen') { volumeLevel=i.options.getInteger('nivel',true)/100; const resource=player.state.resource; if(resource?.volume) resource.volume.setVolume(volumeLevel); return i.editReply(`🔊 Volumen ajustado al **${Math.round(volumeLevel*100)}%**.`); }
+    if (i.commandName === 'quitar') { const pos=i.options.getInteger('posicion',true)-1; if(pos<0||pos>=queue.length) return i.editReply('No existe una canción en esa posición. Usa /cola para ver los números.'); const [removed]=queue.splice(pos,1); return i.editReply(`🗑️ Quité **${removed.title}** de la cola.`); }
+    if (i.commandName === 'limpiar') { const removed=queue.length; queue=[]; return i.editReply(`🧹 Cola vaciada. Se quitaron ${removed} canciones; la actual sigue sonando.`); }
+    if (i.commandName === 'autoplay') { autoplayEnabled=i.options.getBoolean('activo',true); return i.editReply(`♾️ Autoplay ${autoplayEnabled?'activado':'desactivado'}.`); }
   } catch(e) { console.error('Comando falló:',e); lastError=e.message; const message=`❌ ${e.message || 'Ocurrió un error. Revisa los logs de Render.'}`; if(i.deferred||i.replied) await i.editReply({content:message,components:[]}).catch(()=>{}); else await i.reply({content:message,ephemeral:true}).catch(()=>{}); }
 });
 const server=app.listen(process.env.PORT||10000,'0.0.0.0',()=>console.log('API escuchando.'));
