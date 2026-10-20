@@ -10,7 +10,7 @@ Esta versión cambia el motor principal de extracción a **yt-dlp + FFmpeg**, pa
 5. Cuando termine el deploy, usa `/diagnostico` en tu servidor de Discord. Debe mostrar una versión de yt-dlp y `FFmpeg: disponible`.
 6. Entra a un canal de voz y prueba `/play consulta: nombre de canción`. También puedes probar un enlace público de YouTube o SoundCloud.
 
-El script `postinstall` intenta descargar el ejecutable de yt-dlp; si falla, intenta instalarlo con Python/pip. Comprueba los logs de build para confirmar que uno de esos métodos terminó correctamente.
+El script `postinstall` intenta descargar el ejecutable nightly de yt-dlp; si falla, instala yt-dlp con el mismo intérprete Python que utiliza la aplicación y verifica la instalación. Si ambas vías fallan, el despliegue termina con error para evitar que el bot arranque sin yt-dlp.
 
 ## Comandos slash
 - `/entrar`, `/salir`, `/estado`, `/diagnostico`
