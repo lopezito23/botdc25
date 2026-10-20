@@ -154,29 +154,117 @@ async function searchTracks(query) {
     const info=await timeout(play.video_basic_info(q),SEARCH_TIMEOUT_MS,'YouTube tardó demasiado en responder. Inténtalo otra vez.');
     return [normalizeVideo(info.video_details)];
   }
-  const results=await timeout(play.search(q,{limit:5,source:{youtube:'video'}}),SEARCH_TIMEOUT_MS,'La búsqueda tardó demasiado. Prueba de nuevo.');
-  const tracks=results.filter(v=>v?.url).map(normalizeVideo);
-  if(!tracks.length)throw new Error('No encontré canciones. Prueba con el nombre y el artista.');
-  return tracks;
+  try {
+    const results = await timeout(
+      play.search(q, { limit: 5, source: { youtube: 'video' } }),
+      SEARCH_TIMEOUT_MS,
+      'La búsqueda en YouTube tardó demasiado.'
+    );
+    const tracks = results.filter(v => v?.url).map(normalizeVideo);
+    if (tracks.length) return tracks;
+  } catch (youtubeError) {
+    console.warn(`Falló la búsqueda en YouTube (${youtubeError.message}); probando SoundCloud.`);
+  }
+
+  // Search an alternative provider too if YouTube search is rate-limited or unavailable.
+  try {
+    const results = await timeout(
+      play.search(q, { limit: 5, source: { soundcloud: 'tracks' } }),
+      SEARCH_TIMEOUT_MS,
+      'La búsqueda alternativa en SoundCloud tardó demasiado.'
+    );
+    const tracks = (results || []).filter(v => v?.url && /soundcloud\.com/i.test(v.url)).map(v => ({
+      title: v.name || v.title || 'Pista de SoundCloud',
+      url: v.url,
+      duration: v.durationRaw || (Number.isFinite(v.durationInSec) ? `${Math.floor(v.durationInSec / 60)}:${String(v.durationInSec % 60).padStart(2, '0')}` : '—'),
+      source: 'SoundCloud',
+      thumbnail: v.thumbnail || v.user?.thumbnail || null
+    }));
+    if (tracks.length) return tracks;
+  } catch (soundCloudError) {
+    console.error(`También falló la búsqueda en SoundCloud: ${soundCloudError.message}`);
+  }
+  throw new Error('No pude encontrar la canción en YouTube ni en SoundCloud. Puede ser una limitación temporal; espera unos minutos y prueba otra vez.');
 }
+async function findSoundCloudFallback(track) {
+  const query = String(track?.title || '')
+    .replace(/\s*[—-]\s*YouTube.*$/i, '')
+    .trim();
+  if (!query) throw new Error('No hay título para buscar una fuente alternativa.');
+
+  const results = await timeout(
+    play.search(query, { limit: 5, source: { soundcloud: 'tracks' } }),
+    SEARCH_TIMEOUT_MS,
+    'La búsqueda alternativa en SoundCloud tardó demasiado.'
+  );
+  const candidate = (results || []).find(item => item?.url && /soundcloud\.com/i.test(item.url));
+  if (!candidate) throw new Error('YouTube devolvió un error y no encontré una coincidencia en SoundCloud.');
+  const stream = await timeout(
+    play.stream(candidate.url),
+    STREAM_TIMEOUT_MS,
+    'SoundCloud también tardó demasiado en preparar el audio.'
+  );
+  const duration = candidate.durationRaw || (Number.isFinite(candidate.durationInSec)
+    ? `${Math.floor(candidate.durationInSec / 60)}:${String(candidate.durationInSec % 60).padStart(2, '0')}`
+    : track.duration);
+  return {
+    stream,
+    track: {
+      ...track,
+      title: candidate.name || candidate.title || track.title,
+      url: candidate.url,
+      source: 'SoundCloud (alternativa)',
+      thumbnail: candidate.thumbnail || track.thumbnail || null,
+      duration: duration || track.duration
+    }
+  };
+}
+
 async function startNext() {
-  if (processing || !queue.length) { if (!queue.length && !processing && player.state.status === AudioPlayerStatus.Idle) currentTrack = null; return; }
+  if (processing || !queue.length) {
+    if (!queue.length && !processing && player.state.status === AudioPlayerStatus.Idle) currentTrack = null;
+    return;
+  }
   processing = true;
   const track = queue.shift();
   currentTrack = track;
   try {
-    const stream = await timeout(play.stream(track.url), STREAM_TIMEOUT_MS, 'YouTube tardó demasiado en preparar el audio. Salté esa canción.');
-    const resource = createAudioResource(stream.stream, { inputType: stream.type || StreamType.Arbitrary, metadata: track });
+    let activeTrack = track;
+    let stream;
+    try {
+      stream = await timeout(
+        play.stream(track.url),
+        STREAM_TIMEOUT_MS,
+        'La fuente principal tardó demasiado en preparar el audio.'
+      );
+    } catch (primaryError) {
+      const isYoutube = /youtube\.com|youtu\.be/i.test(String(track.url || '')) || /youtube/i.test(String(track.source || ''));
+      if (!isYoutube) throw primaryError;
+      console.warn(`Falló el audio principal para “${track.title}” (${primaryError.message}); probando SoundCloud.`);
+      const fallback = await findSoundCloudFallback(track);
+      stream = fallback.stream;
+      activeTrack = fallback.track;
+      currentTrack = activeTrack;
+    }
+    const resource = createAudioResource(stream.stream, {
+      inputType: stream.type || StreamType.Arbitrary,
+      metadata: activeTrack
+    });
     player.play(resource);
     lastError = null;
-    console.log(`Reproduciendo: ${track.title}`);
+    console.log(`Reproduciendo: ${activeTrack.title} [${activeTrack.source || 'audio'}]`);
   } catch (e) {
     lastError = `No se pudo reproducir “${track.title}”: ${e.message}`;
     console.error(lastError);
     currentTrack = null;
     processing = false;
-    // Give the upstream audio provider time to recover before trying the next track.
-    setTimeout(() => { startNext().catch(err => { lastError = err?.message || 'Error al continuar la cola.'; console.error(lastError); }); }, 3000);
+    // Cool down after provider errors instead of hammering the same upstream service.
+    setTimeout(() => {
+      startNext().catch(err => {
+        lastError = err?.message || 'Error al continuar la cola.';
+        console.error(lastError);
+      });
+    }, 5000);
     return;
   }
   processing = false;
