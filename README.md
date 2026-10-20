@@ -25,3 +25,17 @@ Ningún extractor puede garantizar disponibilidad del 100%: YouTube y SoundCloud
 
 ### Nota v6.6.6
 La extracción de YouTube prueba el cliente `android_vr` de yt-dlp para evitar algunos fallos de respuesta del reproductor. YouTube cambia con frecuencia sus requisitos y ningún cliente alternativo garantiza acceso a todos los vídeos. Se aumentó el tiempo máximo de búsqueda a 45 segundos.
+
+
+## v6.6.7 — diagnóstico mejorado
+
+- `/diagnostico` da hasta 20 segundos a `yt-dlp --version` y muestra el ejecutable utilizado (binario independiente o módulo Python).
+- Si falla, el diagnóstico muestra el comando que intentó ejecutar para facilitar la revisión de los logs de Render.
+- Esta mejora aclara el diagnóstico, pero no puede garantizar que YouTube permita extraer audio desde la IP de Render; si YouTube bloquea la solicitud, revisa el error de extracción en los logs.
+
+
+## v6.6.8 — compatibilidad del extractor YouTube
+
+- Fuerza los clientes `android_vr` y `web_safari` en búsquedas y reproducción, en lugar de depender de la lista de clientes predeterminada que está fallando en algunos despliegues.
+- Mantiene Node.js como runtime JavaScript y el componente remoto EJS de yt-dlp.
+- Esto es un intento dirigido al error `Failed to extract any player response`; no puede garantizar la reproducción si YouTube bloquea o devuelve respuestas vacías a la IP de Render.

@@ -108,9 +108,9 @@ function ytDlpCommand() {
 }
 function runYtDlp(args, timeoutMs = SEARCH_TIMEOUT_MS) {
   const { command, prefix } = ytDlpCommand();
-  // Enable yt-dlp's external JavaScript challenge solver. Do not force a single
-  // YouTube player client: YouTube changes which clients are usable over time.
-  const ytArgs = [...prefix, '--js-runtimes', 'node', '--remote-components', 'ejs:github', ...args];
+  // Keep the JS challenge solver enabled and use clients that are less dependent
+  // on YouTube's changing default client list. Render must still be able to reach YouTube.
+  const ytArgs = [...prefix, '--js-runtimes', 'node', '--remote-components', 'ejs:github', '--extractor-args', 'youtube:player_client=android_vr,web_safari', ...args];
   return new Promise((resolve, reject) => {
     const child = spawn(command, ytArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false;
@@ -219,7 +219,7 @@ async function searchTracks(query) {
 function createYtDlpAudio(track) {
   if (!FFMPEG_PATH) throw new Error('No se encontró FFmpeg. Revisa la instalación de ffmpeg-static en Render.');
   const { command, prefix } = ytDlpCommand();
-  const yt = spawn(command, [...prefix, '--js-runtimes','node','--remote-components','ejs:github','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
+  const yt = spawn(command, [...prefix, '--js-runtimes','node','--remote-components','ejs:github','--extractor-args','youtube:player_client=android_vr,web_safari','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
   const ff = spawn(FFMPEG_PATH, ['-hide_banner','-loglevel','error','-i','pipe:0','-vn','-c:a','libopus','-b:a','128k','-f','ogg','pipe:1'], { stdio: ['pipe','pipe','pipe'] });
   let ytErr='', ffErr='', didCleanup=false;
   yt.stderr.on('data', c => { if (ytErr.length < 1000) ytErr += c.toString(); });
@@ -399,8 +399,8 @@ client.on('interactionCreate', async i => {
     if (i.commandName === 'estado') { const c=getConnection(); return i.editReply(`Bot: **${client.isReady()?'Online':'Offline'}** · Voz: **${c?c.state.status:'Desconectado'}** · Música: **${currentTrack?currentTrack.title:'Nada reproduciéndose'}**`); }
     if (i.commandName === 'diagnostico') {
       let engine = 'yt-dlp no disponible';
-      try { const version = await runYtDlp(['--version'], 7000); engine = `yt-dlp ${version}`; }
-      catch (e) { engine = `ERROR: ${e.message}`; }
+      try { const version = await runYtDlp(['--version'], 20000); const { command, prefix } = ytDlpCommand(); engine = `yt-dlp ${version} · ${prefix.length ? `${command} ${prefix.join(' ')}` : command}`; }
+      catch (e) { const { command, prefix } = ytDlpCommand(); engine = `ERROR: ${e.message} · ejecutable: ${command}${prefix.length ? ` ${prefix.join(' ')}` : ''}`; }
       const ffmpeg = FFMPEG_PATH && fs.existsSync(FFMPEG_PATH) ? 'disponible' : 'NO disponible';
       const c = getConnection();
       return i.editReply(`🧪 **Diagnóstico X23 Music**\n• Bot: ${client.isReady()?'Online':'Offline'}\n• Motor: ${engine}\n• FFmpeg: ${ffmpeg}\n• Voz: ${c?c.state.status:'Desconectado'}\n• Reproducción: ${currentTrack?currentTrack.title:'ninguna'}\n• Último error: ${lastError||'ninguno'}`);
