@@ -1,4 +1,4 @@
-# X23 Music v6.3 — Bot, API y dashboard
+# X23 Music v6.4 — Bot, API y dashboard
 
 ## Archivos
 - `index.js`, `package.json`: bot + API para Render.
@@ -43,3 +43,9 @@ No subas secretos a GitHub. Si el token del bot se expuso, restablécelo en Disc
 ### SoundCloud en Render (opcional)
 
 La versión 6.3 intenta resolver automáticamente el `client_id` de SoundCloud. Si la resolución automática falla, puedes añadir `SOUNDCLOUD_CLIENT_ID` en Render → Environment con un client ID válido de tu propia aplicación de SoundCloud. No pongas ese valor en el dashboard público ni en `app.js`.
+
+
+### v6.4
+- Rechaza resultados de audio incompletos antes de que rompan la cola.
+- Si una pista de SoundCloud devuelve 404 o falla al abrir el flujo, prueba otras coincidencias en lugar de detenerse en la primera.
+- Reintenta buscar por el título limpio y muestra un error más útil si ninguna coincidencia puede transmitirse.
