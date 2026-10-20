@@ -1,4 +1,4 @@
-# X23 Music v6.6 — motor de audio actualizado
+# X23 Music v6.6.4 — motor de audio actualizado
 
 Esta versión cambia el motor principal de extracción a **yt-dlp + FFmpeg**, para dejar de depender del extractor `play-dl` que estaba devolviendo HTTP 429/404. Conserva el dashboard, las rutas de API y los controles existentes.
 
@@ -10,7 +10,7 @@ Esta versión cambia el motor principal de extracción a **yt-dlp + FFmpeg**, pa
 5. Cuando termine el deploy, usa `/diagnostico` en tu servidor de Discord. Debe mostrar una versión de yt-dlp y `FFmpeg: disponible`.
 6. Entra a un canal de voz y prueba `/play consulta: nombre de canción`. También puedes probar un enlace público de YouTube o SoundCloud.
 
-El script `postinstall` intenta descargar el ejecutable nightly de yt-dlp; si falla, instala yt-dlp con el mismo intérprete Python que utiliza la aplicación y verifica la instalación. Si ambas vías fallan, el despliegue termina con error para evitar que el bot arranque sin yt-dlp.
+El script `postinstall` descarga primero el binario nightly independiente (`yt-dlp_linux` en Render), que no depende del módulo `yt_dlp` de Python. El bot también indica explícitamente a yt-dlp que use Node.js como runtime JavaScript al extraer YouTube. Si la descarga del binario falla, intenta instalar y verificar el módulo de Python como respaldo; si ambas vías fallan, el despliegue termina con error.
 
 ## Comandos slash
 - `/entrar`, `/salir`, `/estado`, `/diagnostico`

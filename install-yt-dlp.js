@@ -4,7 +4,10 @@ const https = require('node:https');
 const { spawnSync } = require('node:child_process');
 
 const binDir = path.join(__dirname, 'bin');
-const binary = path.join(binDir, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
+const isWindows = process.platform === 'win32';
+const binary = path.join(binDir, isWindows ? 'yt-dlp.exe' : 'yt-dlp');
+const asset = isWindows ? 'yt-dlp.exe' : 'yt-dlp_linux';
+const url = `https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/${asset}`;
 const python = process.env.PYTHON || 'python3';
 
 function download(url, destination, redirects = 0) {
@@ -25,37 +28,32 @@ function download(url, destination, redirects = 0) {
       output.on('error', reject);
     });
     request.on('error', reject);
-    request.setTimeout(45000, () => request.destroy(new Error('Tiempo agotado descargando yt-dlp.')));
+    request.setTimeout(90000, () => request.destroy(new Error('Tiempo agotado descargando yt-dlp.')));
   });
 }
-
 function run(command, args) {
   return spawnSync(command, args, { encoding: 'utf8', timeout: 120000 });
 }
-
 (async () => {
   fs.mkdirSync(binDir, { recursive: true });
   try {
-    console.log('Descargando yt-dlp nightly...');
-    await download('https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp', binary);
-    if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+    console.log(`Descargando yt-dlp nightly independiente (${asset})...`);
+    await download(url, binary);
+    if (!isWindows) fs.chmodSync(binary, 0o755);
     const check = run(binary, ['--version']);
     if (check.status !== 0) throw new Error((check.stderr || check.error?.message || 'No se pudo ejecutar el binario').trim());
-    console.log(`yt-dlp nightly instalado como binario: ${(check.stdout || '').trim()}`);
+    console.log(`yt-dlp standalone instalado: ${(check.stdout || '').trim()}`);
     process.exit(0);
   } catch (err) {
-    console.warn('No se pudo instalar el binario de yt-dlp:', err.message);
+    console.warn('No se pudo instalar el binario independiente de yt-dlp:', err.message);
     try { if (fs.existsSync(binary)) fs.unlinkSync(binary); } catch {}
   }
 
-  // Instala con el MISMO intérprete que usa index.js en runtime.
-  console.log(`Instalando yt-dlp con Python: ${python}`);
+  console.log(`Respaldo: instalando yt-dlp con Python ${python}...`);
   let pip = run(python, ['-m', 'pip', 'install', '--upgrade', '--pre', 'yt-dlp[default]']);
   if (pip.stdout) process.stdout.write(pip.stdout);
   if (pip.stderr) process.stderr.write(pip.stderr);
-
   if (pip.status !== 0) {
-    console.warn('pip falló; intentando instalar pip en el mismo entorno...');
     const ensure = run(python, ['-m', 'ensurepip', '--upgrade']);
     if (ensure.stdout) process.stdout.write(ensure.stdout);
     if (ensure.stderr) process.stderr.write(ensure.stderr);
@@ -63,15 +61,11 @@ function run(command, args) {
     if (pip.stdout) process.stdout.write(pip.stdout);
     if (pip.stderr) process.stderr.write(pip.stderr);
   }
-
   const check = run(python, ['-m', 'yt_dlp', '--version']);
   if (check.status !== 0) {
-    console.error('ERROR: yt-dlp no quedó instalado en el Python usado por la aplicación.');
+    console.error('ERROR: ni el binario independiente ni el módulo yt_dlp pudieron instalarse.');
     console.error((check.stderr || check.error?.message || 'No se pudo verificar yt-dlp').trim());
     process.exit(1);
   }
   console.log(`yt-dlp instalado mediante Python (${python}): ${(check.stdout || '').trim()}`);
-})().catch(err => {
-  console.error('Fallo inesperado instalando yt-dlp:', err.message);
-  process.exit(1);
-});
+})().catch(err => { console.error('Fallo instalando yt-dlp:', err.message); process.exit(1); });

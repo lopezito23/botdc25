@@ -109,7 +109,7 @@ function ytDlpCommand() {
 function runYtDlp(args, timeoutMs = SEARCH_TIMEOUT_MS) {
   const { command, prefix } = ytDlpCommand();
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [...prefix, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, [...prefix, '--js-runtimes', 'node', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false;
     const timer = setTimeout(() => { child.kill('SIGKILL'); finish(new Error('yt-dlp agotó el tiempo de espera.')); }, timeoutMs);
     const finish = (err, value) => { if (settled) return; settled = true; clearTimeout(timer); err ? reject(err) : resolve(value); };
@@ -216,7 +216,7 @@ async function searchTracks(query) {
 function createYtDlpAudio(track) {
   if (!FFMPEG_PATH) throw new Error('No se encontró FFmpeg. Revisa la instalación de ffmpeg-static en Render.');
   const { command, prefix } = ytDlpCommand();
-  const yt = spawn(command, [...prefix, '--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
+  const yt = spawn(command, [...prefix, '--js-runtimes','node','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
   const ff = spawn(FFMPEG_PATH, ['-hide_banner','-loglevel','error','-i','pipe:0','-vn','-c:a','libopus','-b:a','128k','-f','ogg','pipe:1'], { stdio: ['pipe','pipe','pipe'] });
   let ytErr='', ffErr='', didCleanup=false;
   yt.stderr.on('data', c => { if (ytErr.length < 1000) ytErr += c.toString(); });
