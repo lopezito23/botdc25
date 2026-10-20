@@ -1,10 +1,12 @@
 {
   "name": "x23-music-bot",
-  "version": "6.5.0",
-  "description": "X23 Music Discord bot, advanced player API and dashboard",
+  "version": "6.6.0",
+  "description": "X23 Music Discord bot with yt-dlp + FFmpeg audio engine",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "postinstall": "node install-yt-dlp.js",
+    "check": "node --check index.js"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -14,6 +16,7 @@
     "cors": "^2.8.5",
     "discord.js": "^14.24.2",
     "express": "^5.1.0",
-    "play-dl": "^1.9.7"
+    "ffmpeg-static": "^5.2.0",
+    "yt-dlp-wrap": "^2.3.12"
   }
 }
