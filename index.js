@@ -11,7 +11,7 @@ const {
 } = require('@discordjs/voice');
 const play = require('play-dl');
 
-const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID, OWNER_ID, WEB_API_TOKEN } = process.env;
+const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID, OWNER_ID, WEB_API_TOKEN, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } = process.env;
 const missing = ['DISCORD_TOKEN','CLIENT_ID','GUILD_ID','OWNER_ID','WEB_API_TOKEN'].filter(k => !process.env[k]);
 if (missing.length) throw new Error(`Faltan variables de entorno: ${missing.join(', ')}. Configúralas en Render > Environment.`);
 
@@ -97,24 +97,67 @@ async function connectToVoice(channel, guild) {
 function normalizeVideo(v) {
   return { title: v.title || 'Video de YouTube', url: v.url, duration: v.durationRaw || '—', source: 'YouTube', thumbnail: v.thumbnails?.[0]?.url || null };
 }
+let spotifyToken = null, spotifyTokenExpiresAt = 0;
+async function getSpotifyToken() {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) throw new Error('Spotify no está configurado todavía. Añade SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en Render > Environment.');
+  if (spotifyToken && Date.now() < spotifyTokenExpiresAt - 60000) return spotifyToken;
+  const credentials = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
+  const response = await fetch('https://accounts.spotify.com/api/token', { method:'POST', headers:{Authorization:`Basic ${credentials}`,'Content-Type':'application/x-www-form-urlencoded'}, body:'grant_type=client_credentials', signal:AbortSignal.timeout(12000) });
+  const data = await response.json().catch(()=>({}));
+  if (!response.ok || !data.access_token) throw new Error(`Spotify no autorizó la API (${response.status}). Revisa las credenciales en Render.`);
+  spotifyToken=data.access_token; spotifyTokenExpiresAt=Date.now()+(Number(data.expires_in)||3600)*1000; return spotifyToken;
+}
+function spotifyId(url) { const m=String(url).match(/open\.spotify\.com\/(track|playlist|album)\/([a-zA-Z0-9]+)/i); return m?{type:m[1].toLowerCase(),id:m[2]}:null; }
+async function spotifyItems(url) {
+  const parsed=spotifyId(url);
+  if(!parsed) throw new Error('Pega un enlace válido de canción, álbum o playlist de Spotify.');
+  const token=await getSpotifyToken(), headers={Authorization:`Bearer ${token}`};
+  if(parsed.type==='track'){
+    const r=await fetch(`https://api.spotify.com/v1/tracks/${parsed.id}`,{headers,signal:AbortSignal.timeout(12000)}), data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(`No pude leer la canción de Spotify (${r.status}).`);
+    return {playlist:false,tracks:[data]};
+  }
+  let next=parsed.type==='playlist'?`https://api.spotify.com/v1/playlists/${parsed.id}/tracks?limit=100&fields=items(track(name,artists(name),is_local,type)),next`:`https://api.spotify.com/v1/albums/${parsed.id}/tracks?limit=50`;
+  const tracks=[];
+  while(next&&tracks.length<100){
+    const r=await fetch(next,{headers,signal:AbortSignal.timeout(15000)}), data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(`No pude leer la playlist/álbum de Spotify (${r.status}). Comprueba que sea público y accesible.`);
+    for(const item of (data.items||[])){const t=parsed.type==='playlist'?item.track:item;if(t?.name&&t.type!=='episode'&&!t.is_local)tracks.push(t);if(tracks.length>=100)break;}
+    next=data.next||null;
+  }
+  if(!tracks.length)throw new Error('Spotify no devolvió canciones. Comprueba que la playlist sea pública y accesible.');
+  return {playlist:true,tracks};
+}
+function spotifyQuery(t){return `${t.name||''} ${(t.artists||[]).map(a=>a.name).filter(Boolean).join(' ')}`.trim();}
+async function spotifyToYoutube(t){
+  const q=spotifyQuery(t);if(!q)return null;
+  const found=await timeout(play.search(q,{limit:1,source:{youtube:'video'}}),SEARCH_TIMEOUT_MS,`La búsqueda de “${q}” tardó demasiado.`);
+  const v=found.find(x=>x?.url);
+  return v?{...normalizeVideo(v),source:'Spotify → YouTube',title:`${t.name||v.title} — ${(t.artists||[]).map(a=>a.name).join(', ')}`}:null;
+}
 async function searchTracks(query) {
-  const q = String(query || '').trim();
-  if (!q) throw new Error('Escribe el nombre de una canción o pega un enlace de YouTube.');
-  if (q.length > 300) throw new Error('La búsqueda es demasiado larga.');
-  if (/^https?:\/\//i.test(q)) {
-    if (/spotify\.com/i.test(q)) throw new Error('Spotify no entrega audio directamente. Pega el enlace de Spotify solo cuando esté activada la importación de metadatos; por ahora usa YouTube.');
-    if (!/(youtube\.com|youtu\.be)/i.test(q)) throw new Error('Por ahora acepta búsquedas por nombre o enlaces de YouTube.');
-    if (/youtube\.com\/playlist|[?&]list=/i.test(q)) {
-      const info = await timeout(play.playlist_info(q, { incomplete: true }), SEARCH_TIMEOUT_MS, 'La playlist tardó demasiado en cargar. Prueba con un enlace de YouTube más corto.');
-      const videos = await timeout(info.all_videos(), SEARCH_TIMEOUT_MS, 'No pude cargar las canciones de esa playlist.');
-      return videos.filter(v => v?.url).map(normalizeVideo).slice(0, 100);
+  const q=String(query||'').trim();
+  if(!q)throw new Error('Escribe una canción o pega un enlace de YouTube/Spotify.');
+  if(q.length>300)throw new Error('La búsqueda es demasiado larga.');
+  if(/^https?:\/\//i.test(q)){
+    if(/spotify\.com/i.test(q)){
+      const imported=await spotifyItems(q), input=imported.tracks.slice(0,imported.playlist?50:1), mapped=[];
+      for(const track of input){try{const match=await spotifyToYoutube(track);if(match)mapped.push(match);}catch(e){console.warn(`No se encontró coincidencia para ${spotifyQuery(track)}: ${e.message}`);}}
+      if(!mapped.length)throw new Error('Leí Spotify, pero no encontré coincidencias reproducibles.');
+      return mapped;
     }
-    const info = await timeout(play.video_basic_info(q), SEARCH_TIMEOUT_MS, 'YouTube tardó demasiado en responder. Inténtalo otra vez.');
+    if(!/(youtube\.com|youtu\.be)/i.test(q))throw new Error('Usa una búsqueda por nombre o un enlace de YouTube/Spotify.');
+    if(/youtube\.com\/playlist|[?&]list=/i.test(q)){
+      const info=await timeout(play.playlist_info(q,{incomplete:true}),SEARCH_TIMEOUT_MS,'La playlist tardó demasiado en cargar. Prueba de nuevo.');
+      const videos=await timeout(info.all_videos(),SEARCH_TIMEOUT_MS,'No pude cargar las canciones de esa playlist.');
+      return videos.filter(v=>v?.url).map(normalizeVideo).slice(0,100);
+    }
+    const info=await timeout(play.video_basic_info(q),SEARCH_TIMEOUT_MS,'YouTube tardó demasiado en responder. Inténtalo otra vez.');
     return [normalizeVideo(info.video_details)];
   }
-  const results = await timeout(play.search(q, { limit: 5, source: { youtube: 'video' } }), SEARCH_TIMEOUT_MS, 'La búsqueda tardó demasiado. Prueba de nuevo en unos segundos.');
-  const tracks = results.filter(v => v?.url).map(normalizeVideo);
-  if (!tracks.length) throw new Error('No encontré canciones. Prueba con el nombre y el artista.');
+  const results=await timeout(play.search(q,{limit:5,source:{youtube:'video'}}),SEARCH_TIMEOUT_MS,'La búsqueda tardó demasiado. Prueba de nuevo.');
+  const tracks=results.filter(v=>v?.url).map(normalizeVideo);
+  if(!tracks.length)throw new Error('No encontré canciones. Prueba con el nombre y el artista.');
   return tracks;
 }
 async function startNext() {
@@ -170,7 +213,7 @@ app.get('/app.js', (_req,res) => res.sendFile(path.join(__dirname, 'app.js')));
 app.get('/health', (_req,res) => res.status(200).json({ status: 'ok' }));
 app.get('/api/status', requireApi, (_req,res) => { const c = getConnection(); res.json({ online: client.isReady(), bot: client.user ? { id: client.user.id, username: client.user.username } : null, voice: c ? c.state.status : 'disconnected', playing: Boolean(currentTrack), paused: player.state.status === AudioPlayerStatus.Paused, lastError }); });
 app.get('/api/music/queue', requireApi, (_req,res) => res.json(snapshot()));
-app.get('/api/music/search', requireApi, async (req,res) => { try { const tracks = await searchTracks(req.query.q); res.json({ results: tracks.slice(0, 10).map((t,i) => ({ ...publicTrack(t), id: String(i) })) }); } catch(e) { res.status(422).json({ error: e.message || 'Falló la búsqueda.' }); } });
+app.get('/api/music/search', requireApi, async (req,res) => { try { const q=String(req.query.q||''); const tracks=await searchTracks(q); const isPlaylist=/spotify\.com\/(playlist|album)\//i.test(q)||/youtube\.com\/playlist|[?&]list=/i.test(q); res.json({playlist:isPlaylist,results:tracks.slice(0,isPlaylist?100:10).map((t,i)=>({...publicTrack(t),id:String(i)}))}); } catch(e) { res.status(422).json({error:e.message||'Falló la búsqueda.'}); } });
 app.post('/api/music/play', requireApi, async (req,res) => {
   try {
     if (!client.isReady()) return res.status(503).json({ error: 'El bot todavía está iniciando. Espera unos segundos.' });
@@ -179,7 +222,8 @@ app.post('/api/music/play', requireApi, async (req,res) => {
     if (!conn) { const id = req.body?.channelId; if (!id) return res.status(409).json({ error: 'El bot no está en voz. Usa /entrar en Discord primero.' }); await connectToVoice(await guild.channels.fetch(String(id)), guild); }
     else conn.subscribe(player);
     let tracks;
-    if (req.body?.track?.url) tracks = [req.body.track];
+    if (Array.isArray(req.body?.tracks)) tracks = req.body.tracks.filter(t => t && /^https?:\/\//i.test(String(t.url||''))).slice(0,100);
+    else if (req.body?.track?.url) tracks = [req.body.track];
     else tracks = await searchTracks(req.body?.query);
     const result = addTracks(tracks);
     res.json({ ok: true, ...result });
