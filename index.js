@@ -42,21 +42,58 @@ function requireApi(req, res, next) {
 }
 function isOwner(i) { return i.guildId === GUILD_ID && i.user.id === OWNER_ID; }
 async function connectToVoice(channel, guild) {
-  if (!channel || !channel.isVoiceBased?.() || !channel.joinable) throw new Error('No puedo entrar a ese canal de voz. Revisa permisos de Conectar y Hablar.');
+  if (!channel || !channel.isVoiceBased?.() || !channel.joinable) {
+    throw new Error('No puedo entrar a ese canal de voz. Comprueba que el bot tenga permisos de Ver canal, Conectar y Hablar.');
+  }
   let conn = getConnection();
-  if (conn && conn.joinConfig.channelId !== channel.id) { conn.destroy(); conn = null; }
+  if (conn && conn.joinConfig.channelId !== channel.id) {
+    conn.destroy();
+    conn = null;
+  }
   if (!conn) {
-    conn = joinVoiceChannel({ channelId: channel.id, guildId: guild.id, adapterCreator: guild.voiceAdapterCreator, selfDeaf: true, selfMute: false });
-    conn.on('error', e => { lastError = `Voz: ${e.message}`; console.error(lastError); });
+    conn = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: guild.id,
+      adapterCreator: guild.voiceAdapterCreator,
+      selfDeaf: true,
+      selfMute: false,
+      debug: true
+    });
+    conn.on('debug', message => console.log(`[Voice Debug] ${message}`));
+    conn.on('stateChange', (oldState, newState) => {
+      console.log(`[Voice State] ${oldState.status} -> ${newState.status}`);
+    });
+    conn.on('error', e => {
+      lastError = `Voz: ${e.message}`;
+      console.error(lastError);
+    });
     conn.on(VoiceConnectionStatus.Disconnected, async () => {
-      try { await Promise.race([entersState(conn, VoiceConnectionStatus.Signalling, 5000), entersState(conn, VoiceConnectionStatus.Connecting, 5000)]); }
-      catch { if (getConnection() === conn) conn.destroy(); }
+      try {
+        await Promise.race([
+          entersState(conn, VoiceConnectionStatus.Signalling, 5000),
+          entersState(conn, VoiceConnectionStatus.Connecting, 5000)
+        ]);
+      } catch {
+        if (getConnection() === conn) conn.destroy();
+      }
     });
   }
-  await timeout(entersState(conn, VoiceConnectionStatus.Ready, 20000), 21000, 'Discord tardó demasiado en conectar el canal de voz. Vuelve a intentar /entrar.');
+  try {
+    // entersState already has its own timeout. Translate its AbortError into a useful message.
+    await entersState(conn, VoiceConnectionStatus.Ready, 25000);
+  } catch (e) {
+    if (getConnection() === conn) conn.destroy();
+    const detail = e?.name === 'AbortError' || e?.code === 'ABORT_ERR'
+      ? 'Discord no completó el handshake de voz en 25 segundos.'
+      : (e?.message || 'Error desconocido de conexión de voz.');
+    lastError = `No se pudo conectar al canal de voz: ${detail}`;
+    console.error(lastError);
+    throw new Error(`${lastError} Revisa los logs [Voice State] y los permisos del bot; vuelve a probar /entrar.`);
+  }
   conn.subscribe(player);
   return conn;
 }
+
 function normalizeVideo(v) {
   return { title: v.title || 'Video de YouTube', url: v.url, duration: v.durationRaw || '—', source: 'YouTube', thumbnail: v.thumbnails?.[0]?.url || null };
 }
@@ -170,7 +207,7 @@ client.on('interactionCreate', async i => {
     // Acknowledge every slash command immediately so Discord does not time it out.
     await i.deferReply();
     const guild = i.guild;
-    if (i.commandName === 'entrar') { const member=await guild.members.fetch(i.user.id); if(!member.voice.channel) return i.reply({content:'Entra primero a un canal de voz.',ephemeral:true}); await connectToVoice(member.voice.channel,guild); return i.editReply(`✅ Conectado a **${member.voice.channel.name}**.`); }
+    if (i.commandName === 'entrar') { const member=await guild.members.fetch(i.user.id); if(!member.voice.channel) return i.editReply('Entra primero a un canal de voz y vuelve a usar /entrar.'); await connectToVoice(member.voice.channel,guild); return i.editReply(`✅ Conectado a **${member.voice.channel.name}**.`); }
     if (i.commandName === 'salir') { const c=getConnection(); if(!c) return i.editReply({content:'El bot no está conectado a voz.'}); queue=[];currentTrack=null;processing=false;player.stop(true);c.destroy();return i.editReply('Me desconecté y limpié la cola.'); }
     if (i.commandName === 'estado') { const c=getConnection(); return i.editReply(`Bot: **${client.isReady()?'Online':'Offline'}** · Voz: **${c?c.state.status:'Desconectado'}** · Música: **${currentTrack?currentTrack.title:'Nada reproduciéndose'}**`); }
     if (i.commandName === 'play') {
