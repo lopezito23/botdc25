@@ -96,6 +96,33 @@ async function connectToVoice(channel, guild) {
 function normalizeVideo(v) {
   return { title: v.title || 'Video de YouTube', url: v.url, duration: v.durationRaw || '—', source: 'YouTube', thumbnail: v.thumbnails?.[0]?.url || null };
 }
+// play-dl needs a SoundCloud client_id before SoundCloud search/stream calls.
+// Resolve it lazily and reuse it for this process; do not put credentials in the browser.
+let soundCloudClientIdPromise = null;
+async function ensureSoundCloudClientId() {
+  if (!soundCloudClientIdPromise) {
+    soundCloudClientIdPromise = (async () => {
+      if (typeof play.getFreeClientID !== 'function' || typeof play.setToken !== 'function') {
+        throw new Error('La versión instalada de play-dl no permite inicializar SoundCloud.');
+      }
+      const clientId = await timeout(
+        play.getFreeClientID(),
+        SEARCH_TIMEOUT_MS,
+        'SoundCloud tardó demasiado en obtener su identificador de cliente.'
+      );
+      if (typeof clientId !== 'string' || !clientId.trim()) {
+        throw new Error('SoundCloud no devolvió un client_id válido.');
+      }
+      play.setToken({ soundcloud: { client_id: clientId } });
+      console.log('Cliente de SoundCloud inicializado.');
+      return clientId;
+    })().catch(error => {
+      soundCloudClientIdPromise = null;
+      throw new Error(`No se pudo inicializar SoundCloud: ${error.message}`);
+    });
+  }
+  return soundCloudClientIdPromise;
+}
 let spotifyToken = null, spotifyTokenExpiresAt = 0;
 async function getSpotifyToken() {
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) throw new Error('Spotify no está configurado todavía. Añade SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en Render > Environment.');
@@ -168,6 +195,7 @@ async function searchTracks(query) {
 
   // Search an alternative provider too if YouTube search is rate-limited or unavailable.
   try {
+    await ensureSoundCloudClientId();
     const results = await timeout(
       play.search(q, { limit: 5, source: { soundcloud: 'tracks' } }),
       SEARCH_TIMEOUT_MS,
@@ -192,6 +220,7 @@ async function findSoundCloudFallback(track) {
     .trim();
   if (!query) throw new Error('No hay título para buscar una fuente alternativa.');
 
+  await ensureSoundCloudClientId();
   const results = await timeout(
     play.search(query, { limit: 5, source: { soundcloud: 'tracks' } }),
     SEARCH_TIMEOUT_MS,
