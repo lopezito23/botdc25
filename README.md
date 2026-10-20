@@ -1,53 +1,28 @@
-# X23 Music — Bot + Web API + página web
+# X23 Music v2 — Bot, API y dashboard
 
-Este paquete contiene:
-- `bot/`: bot de Discord con comandos slash y API protegida.
-- `web/`: página web estática para controlar reproducción, cola, pausa, reanudar, saltar y detener.
+## Archivos
+- `index.js`, `package.json`: bot + API para Render.
+- `index.html`, `styles.css`, `app.js`: dashboard estático para GitHub Pages.
 
-## Limitaciones importantes
-- La reproducción está implementada para búsquedas y enlaces de YouTube usando `play-dl`. Los extractores de terceros pueden dejar de funcionar cuando las plataformas cambian sus sistemas o condiciones.
-- Las playlists de YouTube compatibles se añaden a la cola.
-- Spotify no reproduce su audio directamente en este bot. Para usar Spotify habría que integrar su API oficial para leer metadatos, y luego resolver las canciones mediante una fuente de reproducción autorizada; esta versión no importa playlists de Spotify.
-- El token de la API se introduce manualmente en la página y no se guarda en el código de la web. No lo pongas en `app.js`, GitHub Pages ni en un repositorio público.
-- Un servicio gratuito puede suspenderse o reiniciarse; UptimeRobot no garantiza voz 24/7.
+## Render
+Sube todos los archivos del ZIP a la raíz del repositorio `botdc25`, reemplazando los archivos con el mismo nombre. El mismo servicio Render sirve la página en `/` y la API en `/api/...`. En Render usa:
+- Build command: `npm install`
+- Start command: `npm start`
+- Variables: `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `OWNER_ID`, `WEB_API_TOKEN`
 
-## 1. Desplegar el bot en Render
-1. Sube el contenido de la carpeta `bot/` a un repositorio privado o público de GitHub (no subas `.env`).
-2. En Render, crea `New +` → `Web Service` y conecta ese repositorio.
-3. Build Command: `npm install`
-4. Start Command: `npm start`
-5. Runtime: Node.
-6. En Environment Variables, agrega:
-   - `DISCORD_TOKEN`: token del bot de Discord
-   - `CLIENT_ID`: ID de aplicación
-   - `GUILD_ID`: ID del servidor de Discord
-   - `OWNER_ID`: tu ID de usuario
-   - `WEB_API_TOKEN`: un secreto largo y aleatorio que inventes
-   - `PORT`: normalmente Render lo asigna; puedes omitirlo
-7. En Discord Developer Portal, habilita el bot e invita al servidor con permisos de usar comandos y conectarse/hablar en voz.
+`GET /health` no necesita token. Las demás rutas API requieren `Authorization: Bearer WEB_API_TOKEN`.
 
-## 2. Probar la API
-Abre `https://TU-SERVICIO.onrender.com/health`. Debe responder `{"status":"ok"}`.
-Los endpoints de control requieren `Authorization: Bearer TU_WEB_API_TOKEN`:
-- `GET /api/status`
-- `GET /api/music/queue`
-- `POST /api/music/play` con JSON `{ "query": "nombre o enlace de YouTube" }`
-- `POST /api/music/pause`
-- `POST /api/music/resume`
-- `POST /api/music/skip`
-- `POST /api/music/stop`
+## Dashboard
+La web está servida por el mismo servicio Render. Abre `https://botdc25.onrender.com/`, deja esa URL en el campo de API y escribe el mismo `WEB_API_TOKEN` configurado en Render. No necesitas un repositorio separado ni GitHub Pages.
 
-Antes de mandar `/api/music/play`, el bot debe estar en un canal de voz. Usa `/entrar` desde Discord o `/play` para conectarlo automáticamente si ya estás en un canal de voz.
+## Funciones
+- `/play consulta` en Discord muestra hasta cinco sugerencias para búsquedas por nombre; selecciona una para añadirla a la cola.
+- En la web, busca por nombre, elige una sugerencia y añádela.
+- API: `GET /api/music/search?q=...`, `POST /api/music/play`, pausa, reanudar, saltar, detener y cola.
+- Tiempo límite en búsquedas y preparación del audio; errores visibles en vez de dejar la interfaz cargando sin fin.
 
-## 3. Publicar la página web
-1. Sube los archivos de `web/` (`index.html`, `styles.css`, `app.js`) a otro repositorio de GitHub.
-2. En GitHub, entra a Settings → Pages → Deploy from a branch → selecciona `main` y `/root` (o la carpeta donde pusiste los archivos).
-3. Abre la URL de GitHub Pages.
-4. En la web, introduce la URL pública de Render y el mismo `WEB_API_TOKEN`.
-5. Pulsa “Conectar API”.
-
-## 4. UptimeRobot
-Crea un monitor HTTP(s) para `https://TU-SERVICIO.onrender.com/health`. Esto puede reducir suspensiones por inactividad, pero no evita todos los reinicios ni garantiza conexión de voz permanente.
+## Limitaciones honestas
+No existe una forma de garantizar que un bot de música “nunca falle”. YouTube puede cambiar su extracción, Render gratis puede suspender/reiniciar, y Discord puede desconectar la voz. Este código añade límites de tiempo, mensajes de error y avance a la siguiente pista cuando una falla, pero requiere pruebas reales tras desplegar. Spotify no está implementado como fuente de audio; no se promete reproducción directa desde Spotify.
 
 ## Seguridad
-No compartas `DISCORD_TOKEN` ni `WEB_API_TOKEN`. Si un token se filtra, cámbialo inmediatamente.
+No subas secretos a GitHub. Si el token del bot se expuso, restablécelo en Discord Developer Portal. El `WEB_API_TOKEN` solo debe configurarse en Render y escribirse manualmente en el dashboard.

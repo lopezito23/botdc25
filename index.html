@@ -1,70 +1,11 @@
 <!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#090d1c">
-  <title>X23 Music — Discord Control</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
-  <header class="topbar">
-    <a class="brand" href="#"><span class="brand-mark">X23</span><span><b>X23 MUSIC</b><small>DISCORD CONTROL CENTER</small></span></a>
-    <div class="top-status"><span class="pulse" id="statusDot"></span><span id="statusText">API sin conectar</span></div>
-  </header>
-  <main class="layout">
-    <section class="hero">
-      <div class="eyebrow"><span class="eyebrow-line"></span> TU MÚSICA, TU CANAL</div>
-      <h1>Controla el ritmo.<br><span>Desde cualquier lugar.</span></h1>
-      <p class="hero-copy">Controla el bot X23 en tu servidor de Discord: reproduce, administra la cola y maneja la sesión desde un solo panel.</p>
-      <div class="hero-chips"><span>● YouTube</span><span>♪ Playlists compatibles</span><span>⌁ Discord Voice</span></div>
-    </section>
-
-    <section class="connect-card panel">
-      <div class="section-heading"><div><span class="kicker">01 / CONEXIÓN</span><h2>Conectar tu bot</h2></div><span class="icon-box">⌁</span></div>
-      <p class="muted">Introduce la URL de tu servicio Render y el token privado de la API. El token solo se mantiene en esta pestaña mientras esté abierta.</p>
-      <label for="apiUrl">URL de la API</label>
-      <input id="apiUrl" type="url" placeholder="https://tu-bot.onrender.com" autocomplete="url">
-      <label for="apiToken">Token de la API</label>
-      <input id="apiToken" type="password" placeholder="WEB_API_TOKEN" autocomplete="off">
-      <div class="connect-actions"><button id="connectBtn" class="button button-primary">Conectar API <span>↗</span></button><span id="connectMessage" class="small muted">Token no guardado</span></div>
-    </section>
-
-    <section class="player-grid">
-      <div class="panel now-playing">
-        <div class="section-heading"><div><span class="kicker">02 / REPRODUCTOR</span><h2>Ahora suena</h2></div><span class="live-tag"><i></i> LIVE</span></div>
-        <div class="track-art"><div class="disc"><div class="disc-core">X23</div></div><div class="equalizer"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
-        <div class="track-info"><h3 id="currentTitle">Nada reproduciéndose</h3><p id="currentSource">Conecta el bot para ver el estado</p></div>
-        <div class="player-controls">
-          <button class="control-button" id="stopBtn" title="Detener">■</button>
-          <button class="control-button control-main" id="pauseBtn" title="Pausar">Ⅱ</button>
-          <button class="control-button" id="skipBtn" title="Siguiente">↠</button>
-        </div>
-        <div class="volume-row"><span>ESTADO DE VOZ</span><b id="voiceStatus">Desconectado</b></div>
-      </div>
-      <div class="panel search-panel">
-        <div class="section-heading"><div><span class="kicker">03 / DESCUBRIR</span><h2>Reproducir música</h2></div><span class="icon-box">⌕</span></div>
-        <p class="muted">Busca por nombre o pega un enlace de YouTube. Los enlaces de playlist compatibles se añaden a la cola.</p>
-        <form id="playForm">
-          <label for="query">Canción o enlace</label>
-          <div class="search-box"><span>⌕</span><input id="query" type="text" placeholder="Ej. nombre de canción o URL..." required><button class="button button-primary" type="submit">Play ↗</button></div>
-        </form>
-        <div class="source-note"><span class="source-logo youtube">▶</span><div><b>YouTube</b><small>Búsqueda y playlists compatibles</small></div><span class="source-ready">DISPONIBLE</span></div>
-        <div class="source-note source-muted"><span class="source-logo spotify">♫</span><div><b>Spotify</b><small>No reproduce audio directamente</small></div><span class="source-later">LIMITADO</span></div>
-        <div id="actionMessage" class="message" role="status">Conecta la API para comenzar.</div>
-      </div>
-    </section>
-
-    <section class="panel queue-panel">
-      <div class="section-heading"><div><span class="kicker">04 / LISTA DE REPRODUCCIÓN</span><h2>Tu cola</h2></div><span class="queue-count" id="queueCount">0 canciones</span></div>
-      <div class="queue-head"><span># / CANCIÓN</span><span>FUENTE</span></div>
-      <div id="queueList" class="queue-list"><div class="empty-queue"><span>♫</span><b>Tu cola está vacía</b><small>Busca una canción o añade una playlist compatible.</small></div></div>
-      <div class="queue-footer"><span id="queueSummary">0 canciones en espera</span><button id="refreshBtn" class="button button-ghost">↻ Actualizar</button></div>
-    </section>
-
-    <footer><span class="footer-brand">X23 <i> MUSIC</i></span><span>Hecho para tu comunidad de Discord.</span><span class="footer-dot">●</span></footer>
-  </main>
-  <script src="app.js"></script>
-</body>
-</html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a0b12"><title>X23 Music — Dashboard</title><link rel="stylesheet" href="styles.css"></head>
+<body><aside class="sidebar"><a class="brand" href="#overview"><span class="logo">X23</span><span><b>X23 Music</b><small>CONTROL CENTER</small></span></a><div class="server-card"><span class="server-icon">♫</span><span><b>Tu servidor</b><small>Discord music</small></span><i id="sideDot" class="dot"></i></div><p class="nav-label">WORKSPACE</p><nav><a class="nav active" href="#overview">▦ <span>Overview</span></a><a class="nav" href="#player">♫ <span>Web Player</span></a><a class="nav" href="#library">▤ <span>Library & Queue</span></a><a class="nav" href="#settings">⚙ <span>Settings</span></a></nav><div class="sidebar-bottom"><div class="mini-status"><i id="sideDot2" class="dot"></i><span><b id="sideStatus">Desconectado</b><small>Bot status</small></span></div><small class="version">X23 MUSIC · v2</small></div></aside>
+<main class="main"><header class="topbar"><div><span class="crumb">WORKSPACE / <b id="pageName">OVERVIEW</b></span><h1 id="welcome">Music dashboard</h1></div><div class="top-right"><span class="status-pill"><i id="statusDot" class="dot"></i><span id="statusText">API sin conectar</span></span><button class="icon-btn" id="refreshBtn" title="Actualizar estado">↻</button></div></header>
+<section id="overview" class="view"><div class="welcome-card"><div><span class="overline">YOUR SOUND. YOUR SPACE.</span><h2>Que siga sonando<span>.</span></h2><p>Busca tu próxima canción, controla el bot y administra tu cola desde un solo lugar.</p><a class="primary-link" href="#player">Abrir reproductor <b>↗</b></a></div><div class="hero-orb"><div class="orb-ring ring1"></div><div class="orb-ring ring2"></div><div class="orb-core">X23<span>♫</span></div><div class="soundbars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
+<div class="stat-grid"><article class="stat-card"><span>BOT STATUS</span><div><strong id="statBot">Offline</strong><i class="stat-icon">◉</i></div><small id="statBotSub">Conecta la API para comenzar</small></article><article class="stat-card"><span>VOICE CONNECTION</span><div><strong id="statVoice">Disconnected</strong><i class="stat-icon">⌁</i></div><small>Canal de voz de Discord</small></article><article class="stat-card"><span>QUEUE</span><div><strong id="statQueue">0</strong><i class="stat-icon">♫</i></div><small>Tracks en espera</small></article></div>
+<div class="content-grid"><article class="card now-card"><div class="card-head"><div><span class="overline">NOW PLAYING</span><h3>En reproducción</h3></div><span class="live-pill"><i></i> LIVE</span></div><div class="now-content"><div class="album-art"><span> X23 </span><div class="art-wave">〰</div></div><div class="track-meta"><h4 id="currentTitle">Nada reproduciéndose</h4><p id="currentSource">Conecta la API para ver la canción actual</p><div class="track-progress"><span></span></div><div class="time-row"><small>NOW PLAYING</small><small id="voiceStatus">Voz desconectada</small></div></div></div><div class="controls"><button id="stopBtn" title="Detener">■</button><button id="pauseBtn" class="play-pause" title="Pausar">Ⅱ</button><button id="skipBtn" title="Siguiente">⏭</button></div></article>
+<article class="card connect-card" id="settings"><div class="card-head"><div><span class="overline">CONNECTION</span><h3>Conectar tu bot</h3></div><span class="card-icon">⌁</span></div><p class="muted">Configura tu URL de Render y el token privado de la API. El token se mantiene solo en esta pestaña.</p><label for="apiUrl">API URL</label><input id="apiUrl" type="url" placeholder="https://botdc25.onrender.com" value="https://botdc25.onrender.com"><label for="apiToken">API TOKEN</label><input id="apiToken" type="password" placeholder="Tu WEB_API_TOKEN" autocomplete="off"><button class="primary-btn full" id="connectBtn">Conectar API <span>↗</span></button><small id="connectMessage" class="hint">Token no guardado</small></article></div></section>
+<section id="player" class="card player-search"><div class="card-head"><div><span class="overline">DISCOVER</span><h3>Encuentra tu siguiente track</h3></div><span class="source-badge">▶ YouTube</span></div><p class="muted">Escribe una canción o artista y elige de las sugerencias, como en los bots de música.</p><form id="searchForm"><div class="search-field"><span>⌕</span><input id="query" placeholder="Busca por canción, artista o pega un enlace…" autocomplete="off" required><button id="searchBtn" class="primary-btn" type="submit">Buscar <span>↗</span></button></div></form><div id="actionMessage" class="message" role="status">Conecta la API para comenzar.</div><div id="suggestions" class="suggestions hidden"></div></section>
+<section id="library" class="card queue-card"><div class="card-head"><div><span class="overline">YOUR LIBRARY</span><h3>Cola de reproducción</h3><p class="muted">Las canciones que esperan para sonar.</p></div><span id="queueCount" class="count-badge">0 tracks</span></div><div class="queue-columns"><span>TRACK</span><span>SOURCE</span></div><div id="queueList" class="queue-list"><div class="empty"><span>♫</span><b>Tu cola está vacía</b><small>Busca algo y añádelo a la cola.</small></div></div><div class="queue-footer"><span id="queueSummary">0 tracks en espera</span><button id="refreshQueue" class="text-btn">↻ Actualizar cola</button></div></section>
+<footer><span><b>X23</b> MUSIC</span><span>Made for your Discord community.</span></footer></main><script src="app.js"></script></body></html>

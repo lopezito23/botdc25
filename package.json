@@ -1,14 +1,14 @@
 {
   "name": "x23-music-bot",
-  "version": "1.0.0",
-  "description": "X23 Discord music bot with a protected web API",
+  "version": "2.0.0",
+  "description": "X23 Music Discord bot, API and dashboard",
   "main": "index.js",
-  "scripts": { "start": "node index.js" },
-  "engines": { "node": ">=22.12.0" },
+  "scripts": {"start": "node index.js"},
+  "engines": {"node": ">=22.12.0"},
   "dependencies": {
-    "@discordjs/voice": "^0.19.0",
+    "@discordjs/voice": "^0.18.0",
     "cors": "^2.8.5",
-    "discord.js": "^14.22.0",
+    "discord.js": "^14.22.1",
     "express": "^5.1.0",
     "play-dl": "^1.9.7"
   }
