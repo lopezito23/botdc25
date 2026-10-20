@@ -1,4 +1,4 @@
-# X23 Music v6.6.4 — motor de audio actualizado
+# X23 Music v6.6.5 — motor de audio actualizado
 
 Esta versión cambia el motor principal de extracción a **yt-dlp + FFmpeg**, para dejar de depender del extractor `play-dl` que estaba devolviendo HTTP 429/404. Conserva el dashboard, las rutas de API y los controles existentes.
 
@@ -21,3 +21,7 @@ El script `postinstall` descarga primero el binario nightly independiente (`yt-d
 
 ## Importante sobre el “100%”
 Ningún extractor puede garantizar disponibilidad del 100%: YouTube y SoundCloud pueden limitar solicitudes, bloquear IPs de alojamiento o cambiar sus sistemas. Este ZIP cambia el motor y agrega diagnóstico, pero la confirmación final requiere desplegarlo y escuchar una canción en tu servidor de Discord. Si `/diagnostico` muestra error de yt-dlp, comparte ese resultado y los logs de Render; no cambies el token de Discord por un error de extracción de audio.
+
+
+### Nota v6.6.5
+La extracción de YouTube prueba el cliente `android_vr` de yt-dlp para evitar algunos fallos de respuesta del reproductor. YouTube cambia con frecuencia sus requisitos y ningún cliente alternativo garantiza acceso a todos los vídeos. Se aumentó el tiempo máximo de búsqueda a 45 segundos.

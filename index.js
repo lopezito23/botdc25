@@ -31,7 +31,7 @@ let autoplayEnabled = false, volumeLevel = 0.7, skipRequested = false;
 const history = [];
 const MAX_QUEUE = 200;
 const pendingSearches = new Map();
-const SEARCH_TIMEOUT_MS = 15000;
+const SEARCH_TIMEOUT_MS = 45000;
 const STREAM_TIMEOUT_MS = 25000;
 
 function timeout(promise, ms, message) {
@@ -108,8 +108,11 @@ function ytDlpCommand() {
 }
 function runYtDlp(args, timeoutMs = SEARCH_TIMEOUT_MS) {
   const { command, prefix } = ytDlpCommand();
+  // Prefer Android VR client, which currently avoids the PO-token requirements
+  // affecting several standard YouTube clients. This is a workaround, not a guarantee.
+  const ytArgs = [...prefix, '--js-runtimes', 'node', '--extractor-args', 'youtube:player_client=android_vr', ...args];
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [...prefix, '--js-runtimes', 'node', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, ytArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false;
     const timer = setTimeout(() => { child.kill('SIGKILL'); finish(new Error('yt-dlp agotó el tiempo de espera.')); }, timeoutMs);
     const finish = (err, value) => { if (settled) return; settled = true; clearTimeout(timer); err ? reject(err) : resolve(value); };
@@ -216,7 +219,7 @@ async function searchTracks(query) {
 function createYtDlpAudio(track) {
   if (!FFMPEG_PATH) throw new Error('No se encontró FFmpeg. Revisa la instalación de ffmpeg-static en Render.');
   const { command, prefix } = ytDlpCommand();
-  const yt = spawn(command, [...prefix, '--js-runtimes','node','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
+  const yt = spawn(command, [...prefix, '--js-runtimes','node','--extractor-args','youtube:player_client=android_vr','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
   const ff = spawn(FFMPEG_PATH, ['-hide_banner','-loglevel','error','-i','pipe:0','-vn','-c:a','libopus','-b:a','128k','-f','ogg','pipe:1'], { stdio: ['pipe','pipe','pipe'] });
   let ytErr='', ffErr='', didCleanup=false;
   yt.stderr.on('data', c => { if (ytErr.length < 1000) ytErr += c.toString(); });
@@ -229,7 +232,19 @@ function createYtDlpAudio(track) {
     for (const child of [yt,ff]) { if (child && child.exitCode === null && !child.killed) child.kill('SIGKILL'); }
   };
   yt.on('error', e => { console.error('yt-dlp stream error:',e.message); ff.stdin.destroy(e); });
-  yt.on('close', code => { if (code !== 0 && !didCleanup) { const msg=/429|too many requests/i.test(ytErr) ? 'YouTube/SoundCloud limitó la solicitud (HTTP 429).' : ytErr.trim().slice(-400); lastError = `yt-dlp: ${msg || `terminó con código ${code}`}`; console.error(lastError); ff.stdin.destroy(new Error(msg || `yt-dlp terminó con código ${code}`)); } });
+  yt.on('close', code => {
+    if (code !== 0 && !didCleanup) {
+      const msg = /429|too many requests/i.test(ytErr)
+        ? 'YouTube/SoundCloud limitó la solicitud (HTTP 429).'
+        : ytErr.trim().split('\n').slice(-4).join(' ').slice(-500);
+      lastError = `yt-dlp: ${msg || `terminó con código ${code}`}`;
+      console.error(lastError);
+      // Stop FFmpeg immediately: its "invalid data" error is only a consequence
+      // when yt-dlp failed to deliver audio.
+      try { ff.stdin.end(); } catch {}
+      if (ff.exitCode === null && !ff.killed) ff.kill('SIGTERM');
+    }
+  });
   ff.on('error', e => console.error('FFmpeg stream error:',e.message));
   ff.on('close', code => { if (code !== 0 && !didCleanup) console.error('FFmpeg terminó:',ffErr.trim().slice(-400)); });
   activeAudioProcesses = { yt, ff, cleanup };
