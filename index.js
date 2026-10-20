@@ -57,9 +57,8 @@ async function connectToVoice(channel, guild) {
       adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: true,
       selfMute: false,
-      debug: true
+      debug: false
     });
-    conn.on('debug', message => console.log(`[Voice Debug] ${message}`));
     conn.on('stateChange', (oldState, newState) => {
       console.log(`[Voice State] ${oldState.status} -> ${newState.status}`);
     });
@@ -176,7 +175,8 @@ async function startNext() {
     console.error(lastError);
     currentTrack = null;
     processing = false;
-    setImmediate(startNext);
+    // Give the upstream audio provider time to recover before trying the next track.
+    setTimeout(() => { startNext().catch(err => { lastError = err?.message || 'Error al continuar la cola.'; console.error(lastError); }); }, 3000);
     return;
   }
   processing = false;
@@ -278,4 +278,10 @@ client.on('interactionCreate', async i => {
 const server=app.listen(process.env.PORT||10000,'0.0.0.0',()=>console.log('API escuchando.'));
 async function start(){ await registerCommands(); await client.login(DISCORD_TOKEN); }
 start().catch(e=>{ console.error('No se pudo iniciar:',e); process.exit(1); });
+process.on('unhandledRejection', reason => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  lastError = `Error asíncrono no controlado: ${message}`;
+  // Do not dump full objects: some libraries may include temporary connection data.
+  console.error('[Unhandled rejection]', message);
+});
 process.on('SIGTERM',()=>{const c=getConnection();if(c)c.destroy();client.destroy();server.close(()=>process.exit(0));});
