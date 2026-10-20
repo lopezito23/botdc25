@@ -362,7 +362,7 @@ app.post('/api/music/resume', requireApi, (_req,res) => { const ok = player.unpa
 app.post('/api/music/skip', requireApi, (_req,res) => { if (!currentTrack) return res.status(409).json({ error:'No hay canción actual.' }); skipRequested=true; player.stop(true); res.json({ ok:true, skipped:true }); });
 app.post('/api/music/stop', requireApi, (_req,res) => { queue=[]; currentTrack=null; processing=false; skipRequested=true; stopAudioProcesses(); player.stop(true); res.json({ ok:true, stopped:true }); });
 
-client.once('ready', () => console.log(`Bot iniciado como ${client.user.tag}`));
+client.once('clientReady', () => console.log(`Bot iniciado como ${client.user.tag}`));
 client.on('interactionCreate', async i => {
   if (i.isStringSelectMenu() && i.customId.startsWith('x23pick:')) {
     if (!isOwner(i)) return i.reply({ content:'No tienes permiso para controlar este bot.', ephemeral:true });
