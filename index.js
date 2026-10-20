@@ -167,12 +167,13 @@ client.on('interactionCreate', async i => {
   if (!i.isChatInputCommand()) return;
   if (!isOwner(i)) return i.reply({ content:'No tienes permiso para controlar este bot.', ephemeral:true });
   try {
+    // Acknowledge every slash command immediately so Discord does not time it out.
+    await i.deferReply();
     const guild = i.guild;
-    if (i.commandName === 'entrar') { const member=await guild.members.fetch(i.user.id); if(!member.voice.channel) return i.reply({content:'Entra primero a un canal de voz.',ephemeral:true}); await connectToVoice(member.voice.channel,guild); return i.reply(`✅ Conectado a **${member.voice.channel.name}**.`); }
-    if (i.commandName === 'salir') { const c=getConnection(); if(!c) return i.reply({content:'El bot no está conectado a voz.',ephemeral:true}); queue=[];currentTrack=null;processing=false;player.stop(true);c.destroy();return i.reply('Me desconecté y limpié la cola.'); }
-    if (i.commandName === 'estado') { const c=getConnection(); return i.reply(`Bot: **${client.isReady()?'Online':'Offline'}** · Voz: **${c?c.state.status:'Desconectado'}** · Música: **${currentTrack?currentTrack.title:'Nada reproduciéndose'}**`); }
+    if (i.commandName === 'entrar') { const member=await guild.members.fetch(i.user.id); if(!member.voice.channel) return i.reply({content:'Entra primero a un canal de voz.',ephemeral:true}); await connectToVoice(member.voice.channel,guild); return i.editReply(`✅ Conectado a **${member.voice.channel.name}**.`); }
+    if (i.commandName === 'salir') { const c=getConnection(); if(!c) return i.editReply({content:'El bot no está conectado a voz.'}); queue=[];currentTrack=null;processing=false;player.stop(true);c.destroy();return i.editReply('Me desconecté y limpié la cola.'); }
+    if (i.commandName === 'estado') { const c=getConnection(); return i.editReply(`Bot: **${client.isReady()?'Online':'Offline'}** · Voz: **${c?c.state.status:'Desconectado'}** · Música: **${currentTrack?currentTrack.title:'Nada reproduciéndose'}**`); }
     if (i.commandName === 'play') {
-      await i.deferReply();
       const member=await guild.members.fetch(i.user.id);
       if (!getConnection()) { if(!member.voice.channel) return i.editReply('Entra a un canal de voz y vuelve a usar /play.'); await connectToVoice(member.voice.channel,guild); }
       const q=i.options.getString('consulta',true);
@@ -186,11 +187,11 @@ client.on('interactionCreate', async i => {
       collector.on('end', collected=>{ pendingSearches.delete(i.id); if(!collected.size) i.editReply({content:'⌛ La búsqueda caducó. Usa /play para buscar otra vez.',components:[]}).catch(()=>{}); });
       return;
     }
-    if (i.commandName === 'pausa') return i.reply(player.pause()?'⏸️ Música pausada.':'No hay música reproduciéndose.');
-    if (i.commandName === 'reanudar') return i.reply(player.unpause()?'▶️ Música reanudada.':'No hay música pausada.');
-    if (i.commandName === 'saltar') return i.reply(currentTrack && player.stop(true)?'⏭️ Canción saltada.':'No hay canción actual.');
-    if (i.commandName === 'cola') { const items=queue.slice(0,10).map((t,n)=>`${n+1}. ${t.title}`).join('\n'); return i.reply({content:`**Ahora:** ${currentTrack?currentTrack.title:'Nada'}\n${items?`**Siguiente:**\n${items}`:'La cola está vacía.'}`,ephemeral:true}); }
-    if (i.commandName === 'parar') { queue=[];currentTrack=null;processing=false;player.stop(true);return i.reply('⏹️ Música detenida y cola vaciada.'); }
+    if (i.commandName === 'pausa') return i.editReply(player.pause()?'⏸️ Música pausada.':'No hay música reproduciéndose.');
+    if (i.commandName === 'reanudar') return i.editReply(player.unpause()?'▶️ Música reanudada.':'No hay música pausada.');
+    if (i.commandName === 'saltar') return i.editReply(currentTrack && player.stop(true)?'⏭️ Canción saltada.':'No hay canción actual.');
+    if (i.commandName === 'cola') { const items=queue.slice(0,10).map((t,n)=>`${n+1}. ${t.title}`).join('\n'); return i.editReply({content:`**Ahora:** ${currentTrack?currentTrack.title:'Nada'}\n${items?`**Siguiente:**\n${items}`:'La cola está vacía.'}`}); }
+    if (i.commandName === 'parar') { queue=[];currentTrack=null;processing=false;player.stop(true);return i.editReply('⏹️ Música detenida y cola vaciada.'); }
   } catch(e) { console.error('Comando falló:',e); lastError=e.message; const message=`❌ ${e.message || 'Ocurrió un error. Revisa los logs de Render.'}`; if(i.deferred||i.replied) await i.editReply({content:message,components:[]}).catch(()=>{}); else await i.reply({content:message,ephemeral:true}).catch(()=>{}); }
 });
 const server=app.listen(process.env.PORT||10000,'0.0.0.0',()=>console.log('API escuchando.'));
