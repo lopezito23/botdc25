@@ -108,9 +108,9 @@ function ytDlpCommand() {
 }
 function runYtDlp(args, timeoutMs = SEARCH_TIMEOUT_MS) {
   const { command, prefix } = ytDlpCommand();
-  // Prefer Android VR client, which currently avoids the PO-token requirements
-  // affecting several standard YouTube clients. This is a workaround, not a guarantee.
-  const ytArgs = [...prefix, '--js-runtimes', 'node', '--extractor-args', 'youtube:player_client=android_vr', ...args];
+  // Enable yt-dlp's external JavaScript challenge solver. Do not force a single
+  // YouTube player client: YouTube changes which clients are usable over time.
+  const ytArgs = [...prefix, '--js-runtimes', 'node', '--remote-components', 'ejs:github', ...args];
   return new Promise((resolve, reject) => {
     const child = spawn(command, ytArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false;
@@ -219,7 +219,7 @@ async function searchTracks(query) {
 function createYtDlpAudio(track) {
   if (!FFMPEG_PATH) throw new Error('No se encontró FFmpeg. Revisa la instalación de ffmpeg-static en Render.');
   const { command, prefix } = ytDlpCommand();
-  const yt = spawn(command, [...prefix, '--js-runtimes','node','--extractor-args','youtube:player_client=android_vr','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
+  const yt = spawn(command, [...prefix, '--js-runtimes','node','--remote-components','ejs:github','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
   const ff = spawn(FFMPEG_PATH, ['-hide_banner','-loglevel','error','-i','pipe:0','-vn','-c:a','libopus','-b:a','128k','-f','ogg','pipe:1'], { stdio: ['pipe','pipe','pipe'] });
   let ytErr='', ffErr='', didCleanup=false;
   yt.stderr.on('data', c => { if (ytErr.length < 1000) ytErr += c.toString(); });
