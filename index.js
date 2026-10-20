@@ -11,7 +11,7 @@ const {
 } = require('@discordjs/voice');
 const play = require('play-dl');
 
-const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID, OWNER_ID, WEB_API_TOKEN, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } = process.env;
+const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID, OWNER_ID, WEB_API_TOKEN, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SOUNDCLOUD_CLIENT_ID } = process.env;
 const missing = ['DISCORD_TOKEN','CLIENT_ID','GUILD_ID','OWNER_ID','WEB_API_TOKEN'].filter(k => !process.env[k]);
 if (missing.length) throw new Error(`Faltan variables de entorno: ${missing.join(', ')}. Configúralas en Render > Environment.`);
 
@@ -96,32 +96,50 @@ async function connectToVoice(channel, guild) {
 function normalizeVideo(v) {
   return { title: v.title || 'Video de YouTube', url: v.url, duration: v.durationRaw || '—', source: 'YouTube', thumbnail: v.thumbnails?.[0]?.url || null };
 }
-// play-dl needs a SoundCloud client_id before SoundCloud search/stream calls.
-// Resolve it lazily and reuse it for this process; do not put credentials in the browser.
+// SoundCloud must be configured before ANY search or stream call. On Render,
+// an explicit SOUNDCLOUD_CLIENT_ID is preferred; otherwise try play-dl's resolver.
 let soundCloudClientIdPromise = null;
 async function ensureSoundCloudClientId() {
   if (!soundCloudClientIdPromise) {
     soundCloudClientIdPromise = (async () => {
-      if (typeof play.getFreeClientID !== 'function' || typeof play.setToken !== 'function') {
-        throw new Error('La versión instalada de play-dl no permite inicializar SoundCloud.');
+      let clientId = typeof SOUNDCLOUD_CLIENT_ID === 'string' ? SOUNDCLOUD_CLIENT_ID.trim() : '';
+      if (!clientId) {
+        if (typeof play.getFreeClientID !== 'function') throw new Error('play-dl no ofrece getFreeClientID().');
+        clientId = await timeout(play.getFreeClientID(), SEARCH_TIMEOUT_MS, 'SoundCloud tardó demasiado en obtener su client_id.');
       }
-      const clientId = await timeout(
-        play.getFreeClientID(),
-        SEARCH_TIMEOUT_MS,
-        'SoundCloud tardó demasiado en obtener su identificador de cliente.'
-      );
-      if (typeof clientId !== 'string' || !clientId.trim()) {
-        throw new Error('SoundCloud no devolvió un client_id válido.');
-      }
-      play.setToken({ soundcloud: { client_id: clientId } });
-      console.log('Cliente de SoundCloud inicializado.');
-      return clientId;
+      if (typeof clientId !== 'string' || !clientId.trim()) throw new Error('SoundCloud no devolvió un client_id válido.');
+      // Re-apply before every use too: some play-dl paths read this shared config lazily.
+      if (typeof play.setToken !== 'function') throw new Error('Esta versión de play-dl no permite configurar SoundCloud.');
+      play.setToken({ soundcloud: { client_id: clientId.trim() } });
+      console.log(`SoundCloud preparado (${SOUNDCLOUD_CLIENT_ID ? 'client_id de Render' : 'client_id automático'}).`);
+      return clientId.trim();
     })().catch(error => {
       soundCloudClientIdPromise = null;
-      throw new Error(`No se pudo inicializar SoundCloud: ${error.message}`);
+      throw new Error(`No se pudo inicializar SoundCloud: ${error?.message || error}`);
     });
   }
-  return soundCloudClientIdPromise;
+  const id = await soundCloudClientIdPromise;
+  play.setToken({ soundcloud: { client_id: id } });
+  return id;
+}
+function normalizeSoundCloud(v) {
+  const seconds = Number(v.durationInSec);
+  return {
+    title: v.name || v.title || 'Pista de SoundCloud',
+    url: v.url,
+    duration: v.durationRaw || (Number.isFinite(seconds) && seconds >= 0 ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '—'),
+    source: 'SoundCloud',
+    thumbnail: v.thumbnail || v.user?.thumbnail || null
+  };
+}
+async function searchSoundCloud(query, limit = 5) {
+  await ensureSoundCloudClientId();
+  const results = await timeout(
+    play.search(query, { limit, source: { soundcloud: 'tracks' } }),
+    SEARCH_TIMEOUT_MS,
+    'La búsqueda en SoundCloud tardó demasiado.'
+  );
+  return (results || []).filter(v => v?.url && /soundcloud\.com/i.test(v.url)).map(normalizeSoundCloud);
 }
 let spotifyToken = null, spotifyTokenExpiresAt = 0;
 async function getSpotifyToken() {
@@ -155,11 +173,14 @@ async function spotifyItems(url) {
   return {playlist:true,tracks};
 }
 function spotifyQuery(t){return `${t.name||''} ${(t.artists||[]).map(a=>a.name).filter(Boolean).join(' ')}`.trim();}
-async function spotifyToYoutube(t){
+async function spotifyToPlayable(t){
   const q=spotifyQuery(t);if(!q)return null;
+  const displayTitle=`${t.name||q.split(' ').slice(0,4).join(' ')} — ${(t.artists||[]).map(a=>a.name).join(', ')}`;
+  try { const sc=await searchSoundCloud(q,1); if(sc.length) return {...sc[0],title:displayTitle,source:'Spotify → SoundCloud'}; }
+  catch(e) { console.warn(`SoundCloud no pudo resolver “${q}”: ${e.message}`); }
   const found=await timeout(play.search(q,{limit:1,source:{youtube:'video'}}),SEARCH_TIMEOUT_MS,`La búsqueda de “${q}” tardó demasiado.`);
   const v=found.find(x=>x?.url);
-  return v?{...normalizeVideo(v),source:'Spotify → YouTube',title:`${t.name||v.title} — ${(t.artists||[]).map(a=>a.name).join(', ')}`}:null;
+  return v?{...normalizeVideo(v),source:'Spotify → YouTube',title:displayTitle}:null;
 }
 async function searchTracks(query) {
   const q=String(query||'').trim();
@@ -168,7 +189,7 @@ async function searchTracks(query) {
   if(/^https?:\/\//i.test(q)){
     if(/spotify\.com/i.test(q)){
       const imported=await spotifyItems(q), input=imported.tracks.slice(0,imported.playlist?50:1), mapped=[];
-      for(const track of input){try{const match=await spotifyToYoutube(track);if(match)mapped.push(match);}catch(e){console.warn(`No se encontró coincidencia para ${spotifyQuery(track)}: ${e.message}`);}}
+      for(const track of input){try{const match=await spotifyToPlayable(track);if(match)mapped.push(match);}catch(e){console.warn(`No se encontró coincidencia para ${spotifyQuery(track)}: ${e.message}`);}}
       if(!mapped.length)throw new Error('Leí Spotify, pero no encontré coincidencias reproducibles.');
       return mapped;
     }
@@ -181,6 +202,14 @@ async function searchTracks(query) {
     const info=await timeout(play.video_basic_info(q),SEARCH_TIMEOUT_MS,'YouTube tardó demasiado en responder. Inténtalo otra vez.');
     return [normalizeVideo(info.video_details)];
   }
+  // Prefer SoundCloud for text searches. This avoids making every request hit
+  // YouTube first, which is currently returning HTTP 429 from Render.
+  try {
+    const soundCloudTracks = await searchSoundCloud(q, 5);
+    if (soundCloudTracks.length) return soundCloudTracks;
+  } catch (soundCloudError) {
+    console.warn(`Falló la búsqueda en SoundCloud (${soundCloudError.message}); probando YouTube.`);
+  }
   try {
     const results = await timeout(
       play.search(q, { limit: 5, source: { youtube: 'video' } }),
@@ -190,27 +219,7 @@ async function searchTracks(query) {
     const tracks = results.filter(v => v?.url).map(normalizeVideo);
     if (tracks.length) return tracks;
   } catch (youtubeError) {
-    console.warn(`Falló la búsqueda en YouTube (${youtubeError.message}); probando SoundCloud.`);
-  }
-
-  // Search an alternative provider too if YouTube search is rate-limited or unavailable.
-  try {
-    await ensureSoundCloudClientId();
-    const results = await timeout(
-      play.search(q, { limit: 5, source: { soundcloud: 'tracks' } }),
-      SEARCH_TIMEOUT_MS,
-      'La búsqueda alternativa en SoundCloud tardó demasiado.'
-    );
-    const tracks = (results || []).filter(v => v?.url && /soundcloud\.com/i.test(v.url)).map(v => ({
-      title: v.name || v.title || 'Pista de SoundCloud',
-      url: v.url,
-      duration: v.durationRaw || (Number.isFinite(v.durationInSec) ? `${Math.floor(v.durationInSec / 60)}:${String(v.durationInSec % 60).padStart(2, '0')}` : '—'),
-      source: 'SoundCloud',
-      thumbnail: v.thumbnail || v.user?.thumbnail || null
-    }));
-    if (tracks.length) return tracks;
-  } catch (soundCloudError) {
-    console.error(`También falló la búsqueda en SoundCloud: ${soundCloudError.message}`);
+    console.warn(`También falló la búsqueda en YouTube (${youtubeError.message}).`);
   }
   throw new Error('No pude encontrar la canción en YouTube ni en SoundCloud. Puede ser una limitación temporal; espera unos minutos y prueba otra vez.');
 }
@@ -228,6 +237,7 @@ async function findSoundCloudFallback(track) {
   );
   const candidate = (results || []).find(item => item?.url && /soundcloud\.com/i.test(item.url));
   if (!candidate) throw new Error('YouTube devolvió un error y no encontré una coincidencia en SoundCloud.');
+  await ensureSoundCloudClientId();
   const stream = await timeout(
     play.stream(candidate.url),
     STREAM_TIMEOUT_MS,
@@ -261,6 +271,7 @@ async function startNext() {
     let activeTrack = track;
     let stream;
     try {
+      if (/soundcloud\.com/i.test(String(track.url || '')) || /soundcloud/i.test(String(track.source || ''))) await ensureSoundCloudClientId();
       stream = await timeout(
         play.stream(track.url),
         STREAM_TIMEOUT_MS,
@@ -377,7 +388,7 @@ client.on('interactionCreate', async i => {
       const q=i.options.getString('consulta',true);
       const tracks=await searchTracks(q);
       if (/^https?:\/\//i.test(q) || tracks.length===1) { addTracks(tracks); return i.editReply(`✅ Añadí **${tracks[0].title}** a la cola.`); }
-      const menu = new StringSelectMenuBuilder().setCustomId(`x23pick:${i.id}`).setPlaceholder('Elige la canción que querías').addOptions(tracks.slice(0,5).map((t,n)=>({ label:t.title.slice(0,100), description:`${t.duration || 'Duración desconocida'} · YouTube`.slice(0,100), value:String(n) })));
+      const menu = new StringSelectMenuBuilder().setCustomId(`x23pick:${i.id}`).setPlaceholder('Elige la canción que querías').addOptions(tracks.slice(0,5).map((t,n)=>({ label:t.title.slice(0,100), description:`${t.duration || 'Duración desconocida'} · ${t.source || 'Audio'}`.slice(0,100), value:String(n) })));
       const row=new ActionRowBuilder().addComponents(menu);
       const msg=await i.editReply({ content:'🔎 **Encontré estas canciones. Elige una para reproducir:**', components:[row] });
       pendingSearches.set(i.id, tracks);

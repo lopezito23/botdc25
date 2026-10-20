@@ -1,4 +1,4 @@
-# X23 Music v6.2 — Bot, API y dashboard
+# X23 Music v6.3 — Bot, API y dashboard
 
 ## Archivos
 - `index.js`, `package.json`: bot + API para Render.
@@ -38,3 +38,8 @@ No existe una forma de garantizar que un bot de música “nunca falle”. YouTu
 
 ## Seguridad
 No subas secretos a GitHub. Si el token del bot se expuso, restablécelo en Discord Developer Portal. El `WEB_API_TOKEN` solo debe configurarse en Render y escribirse manualmente en el dashboard.
+
+
+### SoundCloud en Render (opcional)
+
+La versión 6.3 intenta resolver automáticamente el `client_id` de SoundCloud. Si la resolución automática falla, puedes añadir `SOUNDCLOUD_CLIENT_ID` en Render → Environment con un client ID válido de tu propia aplicación de SoundCloud. No pongas ese valor en el dashboard público ni en `app.js`.
