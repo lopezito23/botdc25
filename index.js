@@ -399,8 +399,8 @@ client.on('interactionCreate', async i => {
     if (i.commandName === 'estado') { const c=getConnection(); return i.editReply(`Bot: **${client.isReady()?'Online':'Offline'}** · Voz: **${c?c.state.status:'Desconectado'}** · Música: **${currentTrack?currentTrack.title:'Nada reproduciéndose'}**`); }
     if (i.commandName === 'diagnostico') {
       let engine = 'yt-dlp no disponible';
-      try { const version = await runYtDlp(['--version'], 20000); const { command, prefix } = ytDlpCommand(); engine = `yt-dlp ${version} · ${prefix.length ? `${command} ${prefix.join(' ')}` : command}`; }
-      catch (e) { const { command, prefix } = ytDlpCommand(); engine = `ERROR: ${e.message} · ejecutable: ${command}${prefix.length ? ` ${prefix.join(' ')}` : ''}`; }
+      try { const version = await runYtDlp(['--version'], 7000); engine = `yt-dlp ${version}`; }
+      catch (e) { engine = `ERROR: ${e.message}`; }
       const ffmpeg = FFMPEG_PATH && fs.existsSync(FFMPEG_PATH) ? 'disponible' : 'NO disponible';
       const c = getConnection();
       return i.editReply(`🧪 **Diagnóstico X23 Music**\n• Bot: ${client.isReady()?'Online':'Offline'}\n• Motor: ${engine}\n• FFmpeg: ${ffmpeg}\n• Voz: ${c?c.state.status:'Desconectado'}\n• Reproducción: ${currentTrack?currentTrack.title:'ninguna'}\n• Último error: ${lastError||'ninguno'}`);
