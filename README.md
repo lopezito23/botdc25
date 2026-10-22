@@ -1,4 +1,4 @@
-# X23 Music v6.6.6 — motor de audio actualizado
+# bot-dc.v10 v10.0.0 — motor de audio actualizado
 
 Esta versión cambia el motor principal de extracción a **yt-dlp + FFmpeg**, para dejar de depender del extractor `play-dl` que estaba devolviendo HTTP 429/404. Conserva el dashboard, las rutas de API y los controles existentes.
 
@@ -23,7 +23,7 @@ El script `postinstall` descarga primero el binario nightly independiente (`yt-d
 Ningún extractor puede garantizar disponibilidad del 100%: YouTube y SoundCloud pueden limitar solicitudes, bloquear IPs de alojamiento o cambiar sus sistemas. Este ZIP cambia el motor y agrega diagnóstico, pero la confirmación final requiere desplegarlo y escuchar una canción en tu servidor de Discord. Si `/diagnostico` muestra error de yt-dlp, comparte ese resultado y los logs de Render; no cambies el token de Discord por un error de extracción de audio.
 
 
-### Nota v6.6.6
+### Nota v10.0.0
 La extracción de YouTube prueba el cliente `android_vr` de yt-dlp para evitar algunos fallos de respuesta del reproductor. YouTube cambia con frecuencia sus requisitos y ningún cliente alternativo garantiza acceso a todos los vídeos. Se aumentó el tiempo máximo de búsqueda a 45 segundos.
 
 
@@ -42,3 +42,12 @@ La extracción de YouTube prueba el cliente `android_vr` de yt-dlp para evitar a
 
 
 Versión 6.6.10: elimina la opción obsoleta `--no-call-home` y registra en los logs de inicio la versión activa de yt-dlp y la ruta del ejecutable.
+
+
+## v10.0.0 — correcciones solicitadas
+
+- El menú de selección limita las opciones a 25, el máximo permitido por Discord.
+- Las búsquedas por texto prueban SoundCloud si la búsqueda de YouTube falla o no devuelve resultados.
+- Si falla la extracción de una canción de YouTube durante la reproducción, el bot intenta buscar una alternativa en SoundCloud una sola vez.
+- El paquete se llama `bot-dc.v10`.
+- La disponibilidad depende de YouTube/SoundCloud y de las restricciones de la IP de Render; no se puede garantizar que el proveedor externo no bloquee las solicitudes.

@@ -147,6 +147,15 @@ async function ytSearch(query, limit = 5) {
   const entries = Array.isArray(data.entries) ? data.entries : [data];
   return entries.map(e => cleanTrack(e, 'YouTube')).filter(Boolean).slice(0, limit);
 }
+async function soundCloudSearch(query, limit = 5) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  const json = await runYtDlp(['--dump-single-json','--flat-playlist','--no-warnings',`scsearch${Math.max(1, Math.min(limit, 10))}:${q}`], SEARCH_TIMEOUT_MS);
+  let data;
+  try { data = JSON.parse(json); } catch { throw new Error('yt-dlp devolvió una respuesta de búsqueda de SoundCloud inválida.'); }
+  const entries = Array.isArray(data.entries) ? data.entries : [data];
+  return entries.map(e => cleanTrack(e, 'SoundCloud')).filter(Boolean).slice(0, limit);
+}
 async function resolveDirectUrl(url) {
   const json = await runYtDlp(['--dump-single-json','--no-warnings','--no-playlist',url], SEARCH_TIMEOUT_MS);
   let data;
@@ -214,7 +223,18 @@ async function searchTracks(query) {
     }
     return resolveDirectUrl(q);
   }
-  return ytSearch(q,5);
+  try {
+    const youtube = await ytSearch(q, 5);
+    if (youtube.length) return youtube;
+  } catch (e) {
+    console.warn(`Búsqueda de YouTube falló; probando SoundCloud: ${e.message}`);
+  }
+  const soundcloud = await soundCloudSearch(q, 5);
+  if (soundcloud.length) {
+    console.log(`Búsqueda alternativa: SoundCloud (${soundcloud.length} resultados).`);
+    return soundcloud;
+  }
+  throw new Error('No encontré resultados reproducibles en YouTube ni SoundCloud. Prueba con otro nombre o enlace.');
 }
 function createYtDlpAudio(track) {
   if (!FFMPEG_PATH) throw new Error('No se encontró FFmpeg. Revisa la instalación de ffmpeg-static en Render.');
@@ -239,8 +259,23 @@ function createYtDlpAudio(track) {
         : ytErr.trim().split('\n').slice(-4).join(' ').slice(-500);
       lastError = `yt-dlp: ${msg || `terminó con código ${code}`}`;
       console.error(lastError);
-      // Stop FFmpeg immediately: its "invalid data" error is only a consequence
-      // when yt-dlp failed to deliver audio.
+      // Si falla YouTube, intenta una alternativa de SoundCloud una sola vez.
+      // Se pausa el avance de la cola mientras se busca el respaldo.
+      if (/youtube/i.test(String(track.source || '') + ' ' + String(track.url || '')) && !track._soundCloudFallbackTried) {
+        track._soundCloudFallbackTried = true;
+        processing = true;
+        const query = String(track.title || '').replace(/\s*\[(?:Official Video|YouTube|Video Oficial|Lyrics|Letras)[^\]]*\]/ig, '').trim();
+        soundCloudSearch(query, 1).then(found => {
+          if (found.length) {
+            queue.unshift({ ...found[0], title: track.title || found[0].title, source: 'SoundCloud (respaldo)' });
+            console.warn(`YouTube falló; intentando alternativa de SoundCloud para: ${query}`);
+          }
+        }).catch(e => console.warn(`No se encontró respaldo en SoundCloud: ${e.message}`)).finally(() => {
+          processing = false;
+          if (!currentTrack && queue.length) setImmediate(startNext);
+        });
+      }
+      // FFmpeg recibe entrada inválida únicamente porque yt-dlp no entregó audio.
       try { ff.stdin.end(); } catch {}
       if (ff.exitCode === null && !ff.killed) ff.kill('SIGTERM');
     }
@@ -328,7 +363,7 @@ const commands = [
   { name: 'entrar', description: 'Conecta el bot al canal de voz donde estás' },
   { name: 'salir', description: 'Desconecta el bot del canal de voz' },
   { name: 'estado', description: 'Muestra el estado del bot' },
-  { name: 'play', description: 'Busca o reproduce audio con yt-dlp', options: [{ name: 'consulta', description: 'Canción o enlace de YouTube, SoundCloud o Spotify', type: 3, required: true }] },
+  { name: 'play', description: 'Busca o reproduce audio con YouTube/SoundCloud', options: [{ name: 'consulta', description: 'Canción o enlace de YouTube, SoundCloud o Spotify', type: 3, required: true }] },
   { name: 'diagnostico', description: 'Comprueba bot, voz y motor de audio' },
   { name: 'pausa', description: 'Pausa la música' }, { name: 'reanudar', description: 'Reanuda la música' },
   { name: 'saltar', description: 'Salta la canción actual' }, { name: 'cola', description: 'Muestra la cola de canciones' },
@@ -409,7 +444,7 @@ client.on('interactionCreate', async i => {
       catch (e) { const { command, prefix } = ytDlpCommand(); engine = `ERROR: ${e.message} · ejecutable: ${command}${prefix.length ? ` ${prefix.join(' ')}` : ''}`; }
       const ffmpeg = FFMPEG_PATH && fs.existsSync(FFMPEG_PATH) ? 'disponible' : 'NO disponible';
       const c = getConnection();
-      return i.editReply(`🧪 **Diagnóstico X23 Music**\n• Bot: ${client.isReady()?'Online':'Offline'}\n• Motor: ${engine}\n• Clientes YouTube: predeterminados de yt-dlp\n• FFmpeg: ${ffmpeg}\n• Voz: ${c?c.state.status:'Desconectado'}\n• Reproducción: ${currentTrack?currentTrack.title:'ninguna'}\n• Último error: ${lastError||'ninguno'}`);
+      return i.editReply(`🧪 **Diagnóstico bot-dc.v10**\n• Bot: ${client.isReady()?'Online':'Offline'}\n• Motor: ${engine}\n• Clientes YouTube: predeterminados de yt-dlp\n• FFmpeg: ${ffmpeg}\n• Voz: ${c?c.state.status:'Desconectado'}\n• Reproducción: ${currentTrack?currentTrack.title:'ninguna'}\n• Último error: ${lastError||'ninguno'}`);
     }
     if (i.commandName === 'play') {
       const member=await guild.members.fetch(i.user.id);
@@ -417,10 +452,13 @@ client.on('interactionCreate', async i => {
       const q=i.options.getString('consulta',true);
       const tracks=await searchTracks(q);
       if (/^https?:\/\//i.test(q) || tracks.length===1) { addTracks(tracks); return i.editReply(`✅ Añadí **${tracks[0].title}** a la cola.`); }
-      const menu = new StringSelectMenuBuilder().setCustomId(`x23pick:${i.id}`).setPlaceholder('Elige la canción que querías').addOptions(tracks.slice(0,5).map((t,n)=>({ label:t.title.slice(0,100), description:`${t.duration || 'Duración desconocida'} · ${t.source || 'Audio'}`.slice(0,100), value:String(n) })));
+      // Discord permite como máximo 25 opciones en un menú desplegable.
+      const menuTracks = tracks.slice(0, 25);
+      if (!menuTracks.length) return i.editReply({ content:'No encontré canciones reproducibles. Prueba otro nombre.', components:[] });
+      const menu = new StringSelectMenuBuilder().setCustomId(`x23pick:${i.id}`).setPlaceholder('Elige la canción que querías').addOptions(menuTracks.map((t,n)=>({ label:String(t.title || 'Canción').slice(0,100), description:`${t.duration || 'Duración desconocida'} · ${t.source || 'Audio'}`.slice(0,100), value:String(n) })));
       const row=new ActionRowBuilder().addComponents(menu);
-      const msg=await i.editReply({ content:'🔎 **Encontré estas canciones. Elige una para reproducir:**', components:[row] });
-      pendingSearches.set(i.id, tracks);
+      const msg=await i.editReply({ content:`🔎 **Encontré ${menuTracks.length} canciones. Elige una para reproducir:**`, components:[row] });
+      pendingSearches.set(i.id, menuTracks);
       const collector=msg.createMessageComponentCollector({ time:60000, max:1, filter: ci=>ci.customId===`x23pick:${i.id}` && ci.user.id===OWNER_ID });
       collector.on('end', collected=>{ pendingSearches.delete(i.id); if(!collected.size) i.editReply({content:'⌛ La búsqueda caducó. Usa /play para buscar otra vez.',components:[]}).catch(()=>{}); });
       return;
