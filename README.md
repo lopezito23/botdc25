@@ -34,7 +34,7 @@ La extracción de YouTube prueba el cliente `android_vr` de yt-dlp para evitar a
 - Esta mejora aclara el diagnóstico, pero no puede garantizar que YouTube permita extraer audio desde la IP de Render; si YouTube bloquea la solicitud, revisa el error de extracción en los logs.
 
 
-## v6.6.8 — compatibilidad del extractor YouTube
+## v6.6.9 — compatibilidad del extractor YouTube
 
 - Fuerza los clientes `android_vr` y `web_safari` en búsquedas y reproducción, en lugar de depender de la lista de clientes predeterminada que está fallando en algunos despliegues.
 - Mantiene Node.js como runtime JavaScript y el componente remoto EJS de yt-dlp.

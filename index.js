@@ -110,7 +110,7 @@ function runYtDlp(args, timeoutMs = SEARCH_TIMEOUT_MS) {
   const { command, prefix } = ytDlpCommand();
   // Keep the JS challenge solver enabled and use clients that are less dependent
   // on YouTube's changing default client list. Render must still be able to reach YouTube.
-  const ytArgs = [...prefix, '--js-runtimes', 'node', '--remote-components', 'ejs:github', '--extractor-args', 'youtube:player_client=android_vr,web_safari', ...args];
+  const ytArgs = [...prefix, '--js-runtimes', 'node', '--remote-components', 'ejs:github', ...args];
   return new Promise((resolve, reject) => {
     const child = spawn(command, ytArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false;
@@ -219,7 +219,7 @@ async function searchTracks(query) {
 function createYtDlpAudio(track) {
   if (!FFMPEG_PATH) throw new Error('No se encontró FFmpeg. Revisa la instalación de ffmpeg-static en Render.');
   const { command, prefix } = ytDlpCommand();
-  const yt = spawn(command, [...prefix, '--js-runtimes','node','--remote-components','ejs:github','--extractor-args','youtube:player_client=android_vr,web_safari','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
+  const yt = spawn(command, [...prefix, '--js-runtimes','node','--remote-components','ejs:github','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
   const ff = spawn(FFMPEG_PATH, ['-hide_banner','-loglevel','error','-i','pipe:0','-vn','-c:a','libopus','-b:a','128k','-f','ogg','pipe:1'], { stdio: ['pipe','pipe','pipe'] });
   let ytErr='', ffErr='', didCleanup=false;
   yt.stderr.on('data', c => { if (ytErr.length < 1000) ytErr += c.toString(); });
@@ -273,7 +273,7 @@ async function startNext() {
     resource.volume?.setVolume(volumeLevel);
     player.play(resource);
     lastError = null;
-    console.log(`Reproduciendo: ${track.title} [${track.source || 'audio'}]`);
+    console.log(`Preparando reproducción: ${track.title} [${track.source || 'audio'}]`);
   } catch (e) {
     stopAudioProcesses();
     lastError = `No se pudo reproducir “${track.title}”: ${e.message}`;
@@ -403,7 +403,7 @@ client.on('interactionCreate', async i => {
       catch (e) { const { command, prefix } = ytDlpCommand(); engine = `ERROR: ${e.message} · ejecutable: ${command}${prefix.length ? ` ${prefix.join(' ')}` : ''}`; }
       const ffmpeg = FFMPEG_PATH && fs.existsSync(FFMPEG_PATH) ? 'disponible' : 'NO disponible';
       const c = getConnection();
-      return i.editReply(`🧪 **Diagnóstico X23 Music**\n• Bot: ${client.isReady()?'Online':'Offline'}\n• Motor: ${engine}\n• FFmpeg: ${ffmpeg}\n• Voz: ${c?c.state.status:'Desconectado'}\n• Reproducción: ${currentTrack?currentTrack.title:'ninguna'}\n• Último error: ${lastError||'ninguno'}`);
+      return i.editReply(`🧪 **Diagnóstico X23 Music**\n• Bot: ${client.isReady()?'Online':'Offline'}\n• Motor: ${engine}\n• Clientes YouTube: predeterminados de yt-dlp\n• FFmpeg: ${ffmpeg}\n• Voz: ${c?c.state.status:'Desconectado'}\n• Reproducción: ${currentTrack?currentTrack.title:'ninguna'}\n• Último error: ${lastError||'ninguno'}`);
     }
     if (i.commandName === 'play') {
       const member=await guild.members.fetch(i.user.id);
