@@ -1,6 +1,6 @@
 {
   "name": "x23-music-bot",
-  "version": "6.6.9",
+  "version": "6.6.10",
   "description": "X23 Music Discord bot with yt-dlp + FFmpeg audio engine",
   "main": "index.js",
   "scripts": {

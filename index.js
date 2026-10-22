@@ -141,14 +141,14 @@ function cleanTrack(entry, sourceHint = 'YouTube') {
 async function ytSearch(query, limit = 5) {
   const q = String(query || '').trim();
   if (!q) return [];
-  const json = await runYtDlp(['--dump-single-json','--flat-playlist','--no-warnings','--no-call-home',`ytsearch${Math.max(1, Math.min(limit, 10))}:${q}`], SEARCH_TIMEOUT_MS);
+  const json = await runYtDlp(['--dump-single-json','--flat-playlist','--no-warnings',`ytsearch${Math.max(1, Math.min(limit, 10))}:${q}`], SEARCH_TIMEOUT_MS);
   let data;
   try { data = JSON.parse(json); } catch { throw new Error('yt-dlp devolvió una respuesta de búsqueda inválida.'); }
   const entries = Array.isArray(data.entries) ? data.entries : [data];
   return entries.map(e => cleanTrack(e, 'YouTube')).filter(Boolean).slice(0, limit);
 }
 async function resolveDirectUrl(url) {
-  const json = await runYtDlp(['--dump-single-json','--no-warnings','--no-call-home','--no-playlist',url], SEARCH_TIMEOUT_MS);
+  const json = await runYtDlp(['--dump-single-json','--no-warnings','--no-playlist',url], SEARCH_TIMEOUT_MS);
   let data;
   try { data = JSON.parse(json); } catch { throw new Error('No pude leer los datos de ese enlace.'); }
   const track = cleanTrack(data, /soundcloud/i.test(url) ? 'SoundCloud' : 'YouTube');
@@ -206,7 +206,7 @@ async function searchTracks(query) {
     }
     const isPlaylist=/youtube\.com\/playlist|[?&]list=/i.test(q);
     if(isPlaylist){
-      const json=await runYtDlp(['--dump-single-json','--flat-playlist','--no-warnings','--no-call-home','--playlist-end','100',q],SEARCH_TIMEOUT_MS);
+      const json=await runYtDlp(['--dump-single-json','--flat-playlist','--no-warnings','--playlist-end','100',q],SEARCH_TIMEOUT_MS);
       let data;try{data=JSON.parse(json);}catch{throw new Error('No pude leer esa playlist.');}
       const tracks=(data.entries||[]).map(e=>cleanTrack(e,'YouTube')).filter(Boolean).slice(0,100);
       if(!tracks.length)throw new Error('La playlist no contiene canciones reproducibles.');
@@ -219,7 +219,7 @@ async function searchTracks(query) {
 function createYtDlpAudio(track) {
   if (!FFMPEG_PATH) throw new Error('No se encontró FFmpeg. Revisa la instalación de ffmpeg-static en Render.');
   const { command, prefix } = ytDlpCommand();
-  const yt = spawn(command, [...prefix, '--js-runtimes','node','--remote-components','ejs:github','--no-playlist','--no-warnings','--no-call-home','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
+  const yt = spawn(command, [...prefix, '--js-runtimes','node','--remote-components','ejs:github','--no-playlist','--no-warnings','-f','bestaudio/best','-o','-','--',track.url], { stdio: ['ignore','pipe','pipe'] });
   const ff = spawn(FFMPEG_PATH, ['-hide_banner','-loglevel','error','-i','pipe:0','-vn','-c:a','libopus','-b:a','128k','-f','ogg','pipe:1'], { stdio: ['pipe','pipe','pipe'] });
   let ytErr='', ffErr='', didCleanup=false;
   yt.stderr.on('data', c => { if (ytErr.length < 1000) ytErr += c.toString(); });
@@ -377,7 +377,13 @@ app.post('/api/music/resume', requireApi, (_req,res) => { const ok = player.unpa
 app.post('/api/music/skip', requireApi, (_req,res) => { if (!currentTrack) return res.status(409).json({ error:'No hay canción actual.' }); skipRequested=true; player.stop(true); res.json({ ok:true, skipped:true }); });
 app.post('/api/music/stop', requireApi, (_req,res) => { queue=[]; currentTrack=null; processing=false; skipRequested=true; stopAudioProcesses(); player.stop(true); res.json({ ok:true, stopped:true }); });
 
-client.once('clientReady', () => console.log(`Bot iniciado como ${client.user.tag}`));
+client.once('clientReady', () => {
+  console.log(`Bot iniciado como ${client.user.tag}`);
+  const { command, prefix } = ytDlpCommand();
+  runYtDlp(['--version'], 15000)
+    .then(version => console.log(`Motor yt-dlp activo: ${version} · ejecutable: ${command}${prefix.length ? ` ${prefix.join(' ')}` : ''}`))
+    .catch(err => { lastError = `No se pudo comprobar yt-dlp: ${err.message}`; console.error(lastError); });
+});
 client.on('interactionCreate', async i => {
   if (i.isStringSelectMenu() && i.customId.startsWith('x23pick:')) {
     if (!isOwner(i)) return i.reply({ content:'No tienes permiso para controlar este bot.', ephemeral:true });
