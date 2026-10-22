@@ -1,70 +1,58 @@
-# bot-dc.v10 — bot de música con Lavalink
+# bot-dc.v10 v10.0.0 — motor de audio actualizado
 
-Esta versión deja de extraer audio directamente con `yt-dlp` desde el proceso de Discord. Usa **Lavalink v4 + el plugin actualizado de YouTube**, con SoundCloud como fuente alternativa. Es una arquitectura más apropiada para un bot de música, pero ningún proveedor puede prometer reproducción sin errores al 100%: YouTube puede bloquear fuentes, y algunas pistas no están disponibles.
+Esta versión cambia el motor principal de extracción a **yt-dlp + FFmpeg**, para dejar de depender del extractor `play-dl` que estaba devolviendo HTTP 429/404. Conserva el dashboard, las rutas de API y los controles existentes.
 
-## Importante: son DOS servicios
+## Despliegue en Render
+1. Descarga este ZIP y reemplaza los archivos del repositorio conectado a Render por los de la carpeta `x23-music-fixed`.
+2. En Render → tu Web Service → **Settings**, configura **Build Command** como `npm install` y **Start Command** como `npm start`.
+3. Conserva estas variables: `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `OWNER_ID`, `WEB_API_TOKEN`. Spotify es opcional: `SPOTIFY_CLIENT_ID` y `SPOTIFY_CLIENT_SECRET`. `SOUNDCLOUD_CLIENT_ID` ya no es necesario para el motor principal.
+4. Haz **Manual Deploy → Clear build cache & deploy** si Render conserva dependencias de una versión anterior.
+5. Cuando termine el deploy, usa `/diagnostico` en tu servidor de Discord. Debe mostrar una versión de yt-dlp y `FFmpeg: disponible`.
+6. Entra a un canal de voz y prueba `/play consulta: nombre de canción`. También puedes probar un enlace público de YouTube o SoundCloud.
 
-El ZIP contiene:
-- `index.js` y `package.json`: el bot de Discord (Node.js).
-- `lavalink-server/`: el motor de audio (Java/Docker).
+El script `postinstall` descarga primero el binario nightly independiente (`yt-dlp_linux` en Render), que no depende del módulo `yt_dlp` de Python. El bot también indica explícitamente a yt-dlp que use Node.js como runtime JavaScript al extraer YouTube. Si la descarga del binario falla, intenta instalar y verificar el módulo de Python como respaldo; si ambas vías fallan, el despliegue termina con error.
 
-No basta con desplegar solo el bot. Los dos servicios deben estar funcionando y el bot necesita conectarse al motor.
+## Comandos slash
+- `/entrar`, `/salir`, `/estado`, `/diagnostico`
+- `/play consulta` — búsqueda o URL de YouTube, SoundCloud o Spotify
+- `/pausa`, `/reanudar`, `/saltar`, `/parar`
+- `/cola`, `/quitar`, `/limpiar`, `/aleatorio`
+- `/repetir modo`, `/volumen nivel`, `/autoplay activo`
 
-## 1) Desplegar el motor Lavalink en Render
+## Importante sobre el “100%”
+Ningún extractor puede garantizar disponibilidad del 100%: YouTube y SoundCloud pueden limitar solicitudes, bloquear IPs de alojamiento o cambiar sus sistemas. Este ZIP cambia el motor y agrega diagnóstico, pero la confirmación final requiere desplegarlo y escuchar una canción en tu servidor de Discord. Si `/diagnostico` muestra error de yt-dlp, comparte ese resultado y los logs de Render; no cambies el token de Discord por un error de extracción de audio.
 
-1. Sube el contenido de este ZIP a la raíz del repositorio de GitHub que usarás.
-2. En Render, crea un **New → Web Service** usando ese repositorio.
-3. En la configuración del servicio Lavalink, selecciona **Docker** y establece **Dockerfile Path** en `./lavalink-server/Dockerfile`.
-4. Añade la variable de entorno `LAVALINK_PASSWORD` con una contraseña larga y única. Guárdala; la necesitarás en el servicio del bot.
-5. Despliega y espera a que los logs indiquen que Lavalink inició correctamente y descargó el plugin de YouTube.
-6. Copia el host público de este servicio, por ejemplo `mi-lavalink.onrender.com`, **sin** `https://` y sin ruta.
 
-Si Render no detecta el puerto, configura el puerto HTTP interno del servicio como el valor de `PORT` que Render asigna (normalmente `10000`). El archivo `application.yml` usa `${PORT:2333}`.
+### Nota v10.0.0
+La extracción de YouTube prueba el cliente `android_vr` de yt-dlp para evitar algunos fallos de respuesta del reproductor. YouTube cambia con frecuencia sus requisitos y ningún cliente alternativo garantiza acceso a todos los vídeos. Se aumentó el tiempo máximo de búsqueda a 45 segundos.
 
-## 2) Desplegar el bot de Discord
 
-Puedes crear un segundo servicio de Render con el mismo repositorio y el entorno **Node**:
-- **Build Command:** `npm install`
-- **Start Command:** `npm start`
+## v6.6.7 — diagnóstico mejorado
 
-Si Render permite configurar Root Directory, déjalo vacío si `package.json` está en la raíz del repositorio.
+- `/diagnostico` da hasta 20 segundos a `yt-dlp --version` y muestra el ejecutable utilizado (binario independiente o módulo Python).
+- Si falla, el diagnóstico muestra el comando que intentó ejecutar para facilitar la revisión de los logs de Render.
+- Esta mejora aclara el diagnóstico, pero no puede garantizar que YouTube permita extraer audio desde la IP de Render; si YouTube bloquea la solicitud, revisa el error de extracción en los logs.
 
-Añade estas variables en el servicio del bot:
 
-| Variable | Valor |
-|---|---|
-| `DISCORD_TOKEN` | Token privado de tu bot de Discord |
-| `CLIENT_ID` | ID de aplicación del bot |
-| `GUILD_ID` | ID del servidor donde registrar comandos |
-| `LAVALINK_HOST` | Host público del servicio Lavalink, sin `https://` |
-| `LAVALINK_PASSWORD` | La misma contraseña configurada en el servicio Lavalink |
-| `LAVALINK_PORT` | `443` |
-| `LAVALINK_SECURE` | `true` |
+## v6.6.10 — compatibilidad del extractor YouTube
 
-No necesitas `DATABASE_URL`, PostgreSQL, Spotify API key, SoundCloud API key ni `WEB_API_TOKEN` para esta versión de solo música.
+- Fuerza los clientes `android_vr` y `web_safari` en búsquedas y reproducción, en lugar de depender de la lista de clientes predeterminada que está fallando en algunos despliegues.
+- Mantiene Node.js como runtime JavaScript y el componente remoto EJS de yt-dlp.
+- Esto es un intento dirigido al error `Failed to extract any player response`; no puede garantizar la reproducción si YouTube bloquea o devuelve respuestas vacías a la IP de Render.
 
-## Comandos de música
 
-- `/play cancion`: busca y reproduce una canción o un enlace.
-- `/skip`: salta la canción actual.
-- `/pause` y `/resume`: pausa y reanuda.
-- `/stop`: detiene y limpia la cola.
-- `/queue`: muestra la cola.
-- `/nowplaying`: muestra la canción actual.
-- `/volume nivel`: volumen del 1 al 100.
-- `/leave`: desconecta el bot.
+Versión 6.6.10: elimina la opción obsoleta `--no-call-home` y registra en los logs de inicio la versión activa de yt-dlp y la ruta del ejecutable.
 
-## Permisos de Discord
 
-Invita el bot con los scopes `bot` y `applications.commands`. Dale permiso para ver canales, enviar mensajes, insertar enlaces, conectarse y hablar en el canal de voz.
+## v10.0.0 — correcciones solicitadas
 
-## Diagnóstico
+- El menú de selección limita las opciones a 25, el máximo permitido por Discord.
+- Las búsquedas por texto prueban SoundCloud si la búsqueda de YouTube falla o no devuelve resultados.
+- Si YouTube bloquea una reproducción, el bot busca hasta cinco alternativas en SoundCloud y las intenta en orden; algunas pistas de SoundCloud pueden estar protegidas por DRM y no ser reproducibles.
+- El paquete se llama `bot-dc.v10`.
+- La disponibilidad depende de YouTube/SoundCloud y de las restricciones de la IP de Render; no se puede garantizar que el proveedor externo no bloquee las solicitudes.
 
-- El bot ofrece `https://TU-SERVICIO-BOT.onrender.com/health` con estado del bot y conexión a Lavalink.
-- En los logs del bot busca `[Lavalink] Conectado al nodo render-lavalink`.
-- Si no conecta, revisa primero que `LAVALINK_HOST`, `LAVALINK_PASSWORD`, `LAVALINK_PORT=443` y `LAVALINK_SECURE=true` coincidan.
-- Si Lavalink arranca pero el plugin de YouTube falla, revisa sus logs: el plugin se descarga en el primer inicio.
 
-## Nota honesta
+### Diagnóstico del bloqueo actual de YouTube
 
-La arquitectura elimina la dependencia directa de `yt-dlp` + FFmpeg del proceso Node del bot y usa un plugin de YouTube con múltiples clientes internos. No puede garantizar que cualquier vídeo esté disponible en cualquier momento. Respeta las condiciones de los servicios de origen y usa enlaces públicos reproducibles.
+Si los logs muestran `Sign in to confirm you’re not a bot`, la IP de Render está siendo bloqueada por YouTube. Esto no se arregla con PostgreSQL ni con una API key de base de datos. Esta versión prueba varias alternativas de SoundCloud para no quedarse atrapada con el primer resultado, pero no puede garantizar que haya una pista pública y sin DRM disponible. No publiques ni compartas cookies de tu cuenta personal de Google para intentar saltar ese bloqueo.
