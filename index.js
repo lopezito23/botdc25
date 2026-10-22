@@ -171,10 +171,51 @@ client.on('interactionCreate', async interaction => {
       await interaction.deferReply();
       if (!nodeConnected) throw new Error('El motor de música aún está conectando. Espera unos segundos y vuelve a intentarlo.');
       const player = await getOrCreatePlayer(interaction);
-      const searchQuery = /^https?:\/\//i.test(query) ? query : query;
-      const result = await player.search({ query: searchQuery }, interaction.user);
-      const tracks = result?.tracks || [];
-      if (!tracks.length) throw new Error('No encontré una canción reproducible. Prueba con otro nombre o un enlace público.');
+      // Enlaces: resolver tal cual. Texto: probar YouTube Music, YouTube y SoundCloud.
+      // Algunos nodos devuelven resultados vacíos con la plataforma predeterminada aunque
+      // el mismo texto sí funciona cuando se especifica el prefijo de búsqueda.
+      const isUrl = /^https?:\/\//i.test(query);
+      const searchQueries = isUrl
+        ? [query]
+        : [`ytmsearch:${query}`, `ytsearch:${query}`, `scsearch:${query}`];
+      let result = null;
+      let tracks = [];
+      let lastSearchError = null;
+      for (const searchTerm of searchQueries) {
+        try {
+          const candidate = await player.search({ query: searchTerm }, interaction.user);
+          const candidateTracks = Array.isArray(candidate?.tracks)
+            ? candidate.tracks
+            : Array.isArray(candidate?.data)
+              ? candidate.data
+              : Array.isArray(candidate?.data?.tracks)
+                ? candidate.data.tracks
+                : [];
+          console.log(`[Búsqueda] ${searchTerm} | tipo=${candidate?.loadType || 'sin tipo'} | pistas=${candidateTracks.length}`);
+          result = candidate;
+          if (candidateTracks.length) {
+            tracks = candidateTracks;
+            break;
+          }
+          if (candidate?.exception || candidate?.data?.message) {
+            lastSearchError = candidate.exception?.message || candidate.data?.message;
+          }
+        } catch (searchError) {
+          lastSearchError = searchError?.message || String(searchError);
+          console.warn(`[Búsqueda] Falló ${searchTerm}: ${lastSearchError}`);
+        }
+      }
+      if (!tracks.length) {
+        console.error('[Búsqueda] Sin resultados:', JSON.stringify({
+          query,
+          loadType: result?.loadType,
+          resultKeys: result && typeof result === 'object' ? Object.keys(result) : [],
+          lastSearchError,
+        }));
+        throw new Error(lastSearchError
+          ? `Lavalink no pudo encontrar la canción: ${lastSearchError}`
+          : 'Lavalink no devolvió canciones. Prueba con un enlace directo de YouTube o SoundCloud; revisa los logs [Búsqueda] para ver qué fuente respondió.');
+      }
       const selected = tracks[0];
       await player.queue.add(selected);
       if (!player.playing) await player.play();
