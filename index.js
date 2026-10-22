@@ -265,10 +265,22 @@ function createYtDlpAudio(track) {
         track._soundCloudFallbackTried = true;
         processing = true;
         const query = String(track.title || '').replace(/\s*\[(?:Official Video|YouTube|Video Oficial|Lyrics|Letras)[^\]]*\]/ig, '').trim();
-        soundCloudSearch(query, 1).then(found => {
-          if (found.length) {
-            queue.unshift({ ...found[0], title: track.title || found[0].title, source: 'SoundCloud (respaldo)' });
-            console.warn(`YouTube falló; intentando alternativa de SoundCloud para: ${query}`);
+        soundCloudSearch(query, 5).then(found => {
+          // SoundCloud puede devolver pistas protegidas por DRM. No podemos saber
+          // cuáles son reproducibles hasta intentar extraerlas, así que probamos
+          // varios resultados en orden en vez de quedarnos con el primero.
+          const seen = new Set();
+          const alternatives = found.filter(item => {
+            const url = String(item.url || '');
+            if (!url || seen.has(url)) return false;
+            seen.add(url);
+            return true;
+          }).map(item => ({ ...item, source: 'SoundCloud (respaldo)', _soundCloudFallbackTried: true }));
+          if (alternatives.length) {
+            queue.unshift(...alternatives);
+            console.warn(`YouTube falló; se probarán ${alternatives.length} alternativas de SoundCloud para: ${query}`);
+          } else {
+            console.warn(`SoundCloud no devolvió alternativas para: ${query}`);
           }
         }).catch(e => console.warn(`No se encontró respaldo en SoundCloud: ${e.message}`)).finally(() => {
           processing = false;

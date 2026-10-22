@@ -48,6 +48,11 @@ Versión 6.6.10: elimina la opción obsoleta `--no-call-home` y registra en los 
 
 - El menú de selección limita las opciones a 25, el máximo permitido por Discord.
 - Las búsquedas por texto prueban SoundCloud si la búsqueda de YouTube falla o no devuelve resultados.
-- Si falla la extracción de una canción de YouTube durante la reproducción, el bot intenta buscar una alternativa en SoundCloud una sola vez.
+- Si YouTube bloquea una reproducción, el bot busca hasta cinco alternativas en SoundCloud y las intenta en orden; algunas pistas de SoundCloud pueden estar protegidas por DRM y no ser reproducibles.
 - El paquete se llama `bot-dc.v10`.
 - La disponibilidad depende de YouTube/SoundCloud y de las restricciones de la IP de Render; no se puede garantizar que el proveedor externo no bloquee las solicitudes.
+
+
+### Diagnóstico del bloqueo actual de YouTube
+
+Si los logs muestran `Sign in to confirm you’re not a bot`, la IP de Render está siendo bloqueada por YouTube. Esto no se arregla con PostgreSQL ni con una API key de base de datos. Esta versión prueba varias alternativas de SoundCloud para no quedarse atrapada con el primer resultado, pero no puede garantizar que haya una pista pública y sin DRM disponible. No publiques ni compartas cookies de tu cuenta personal de Google para intentar saltar ese bloqueo.
