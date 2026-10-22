@@ -36,6 +36,8 @@ if (LAVALINK_HOST.includes('://') || LAVALINK_HOST.includes('/')) {
 
 const commands = [
   new SlashCommandBuilder().setName('play').setDescription('Reproducir una canción o enlace').addStringOption(o => o.setName('cancion').setDescription('Nombre o enlace de la canción').setRequired(true).setMaxLength(500)),
+  new SlashCommandBuilder().setName('join').setDescription('Hacer que el bot entre a tu canal de voz'),
+  new SlashCommandBuilder().setName('entrar').setDescription('Hacer que el bot entre a tu canal de voz'),
   new SlashCommandBuilder().setName('skip').setDescription('Saltar la canción actual'),
   new SlashCommandBuilder().setName('pause').setDescription('Pausar la música'),
   new SlashCommandBuilder().setName('resume').setDescription('Reanudar la música'),
@@ -44,6 +46,7 @@ const commands = [
   new SlashCommandBuilder().setName('nowplaying').setDescription('Mostrar la canción actual'),
   new SlashCommandBuilder().setName('volume').setDescription('Cambiar el volumen').addIntegerOption(o => o.setName('nivel').setDescription('Volumen del 1 al 100').setMinValue(1).setMaxValue(100).setRequired(true)),
   new SlashCommandBuilder().setName('leave').setDescription('Desconectar el bot del canal de voz'),
+  new SlashCommandBuilder().setName('salir').setDescription('Desconectar el bot del canal de voz'),
 ].map(c => c.toJSON());
 
 const app = express();
@@ -190,10 +193,18 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
+    if (command === 'join' || command === 'entrar') {
+      await interaction.deferReply({ ephemeral: true });
+      if (!nodeConnected) throw new Error('El motor de música aún está conectando. Espera unos segundos y vuelve a intentarlo.');
+      const joinedPlayer = await getOrCreatePlayer(interaction);
+      await respond(interaction, `✅ Ya entré a <#${joinedPlayer.voiceChannelId}>.`, true);
+      return;
+    }
+
     const player = getPlayer(interaction.guildId);
-    if (command === 'leave') {
-      if (player) await player.destroy('Comando /leave', true);
-      await respond(interaction, '👋 Me desconecté del canal de voz.');
+    if (command === 'leave' || command === 'salir') {
+      if (player) await player.destroy(`Comando /${command}`, true);
+      await respond(interaction, '👋 Me desconecté del canal de voz.', true);
       return;
     }
     if (!player) throw new Error('No hay música activa. Usa `/play` primero.');
@@ -245,7 +256,7 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`[Discord] Conectado como ${client.user.tag}`);
   try {
     await client.lavalink.init({ ...client.user });
