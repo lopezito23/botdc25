@@ -15,37 +15,9 @@ const FFMPEG_PATH = require('ffmpeg-static');
 const YTDLP_PATH = path.join(__dirname, 'bin', process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 let activeAudioProcesses = null;
 
-<<<<<<< HEAD
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID, OWNER_ID, WEB_API_TOKEN, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SOUNDCLOUD_CLIENT_ID } = process.env;
 const missing = ['DISCORD_TOKEN','CLIENT_ID','GUILD_ID','OWNER_ID','WEB_API_TOKEN'].filter(k => !process.env[k]);
 if (missing.length) throw new Error(`Faltan variables de entorno: ${missing.join(', ')}. Configúralas en Render > Environment.`);
-=======
-const required = ['DISCORD_TOKEN', 'CLIENT_ID', 'GUILD_ID', 'LAVALINK_HOST', 'LAVALINK_PASSWORD'];
-const missing = required.filter((key) => !process.env[key]);
-if (missing.length) {
-  console.error(`Faltan variables de entorno: ${missing.join(', ')}`);
-  process.exit(1);
-}
-if (LAVALINK_HOST.includes('://') || LAVALINK_HOST.includes('/')) {
-  console.error('LAVALINK_HOST debe ser solo el host, sin https:// ni rutas.');
-  process.exit(1);
-}
-
-const commands = [
-  new SlashCommandBuilder().setName('play').setDescription('Reproducir una canción o enlace').addStringOption(o => o.setName('cancion').setDescription('Nombre o enlace de la canción').setRequired(true).setMaxLength(500)),
-  new SlashCommandBuilder().setName('join').setDescription('Hacer que el bot entre a tu canal de voz'),
-  new SlashCommandBuilder().setName('entrar').setDescription('Hacer que el bot entre a tu canal de voz'),
-  new SlashCommandBuilder().setName('skip').setDescription('Saltar la canción actual'),
-  new SlashCommandBuilder().setName('pause').setDescription('Pausar la música'),
-  new SlashCommandBuilder().setName('resume').setDescription('Reanudar la música'),
-  new SlashCommandBuilder().setName('stop').setDescription('Detener la música y limpiar la cola'),
-  new SlashCommandBuilder().setName('queue').setDescription('Mostrar la cola de canciones'),
-  new SlashCommandBuilder().setName('nowplaying').setDescription('Mostrar la canción actual'),
-  new SlashCommandBuilder().setName('volume').setDescription('Cambiar el volumen').addIntegerOption(o => o.setName('nivel').setDescription('Volumen del 1 al 100').setMinValue(1).setMaxValue(100).setRequired(true)),
-  new SlashCommandBuilder().setName('leave').setDescription('Desconectar el bot del canal de voz'),
-  new SlashCommandBuilder().setName('salir').setDescription('Desconectar el bot del canal de voz'),
-].map(c => c.toJSON());
->>>>>>> 1baab75febe6410a312505620d726ee122916102
 
 const app = express();
 app.disable('x-powered-by');
@@ -129,7 +101,6 @@ async function connectToVoice(channel, guild) {
   return conn;
 }
 
-<<<<<<< HEAD
 function ytDlpCommand() {
   if (fs.existsSync(YTDLP_PATH)) return { command: YTDLP_PATH, prefix: [] };
   // Fallback for Render deployments where the standalone release binary could not download.
@@ -249,89 +220,6 @@ async function searchTracks(query) {
       const tracks=(data.entries||[]).map(e=>cleanTrack(e,'YouTube')).filter(Boolean).slice(0,100);
       if(!tracks.length)throw new Error('La playlist no contiene canciones reproducibles.');
       return tracks;
-=======
-    if (command === 'play') {
-      const query = interaction.options.getString('cancion', true).trim();
-      await interaction.deferReply();
-      if (!nodeConnected) throw new Error('El motor de música aún está conectando. Espera unos segundos y vuelve a intentarlo.');
-      const player = await getOrCreatePlayer(interaction);
-      // Enlaces: resolver tal cual. Texto: probar YouTube Music, YouTube y SoundCloud.
-      // Algunos nodos devuelven resultados vacíos con la plataforma predeterminada aunque
-      // el mismo texto sí funciona cuando se especifica el prefijo de búsqueda.
-      const isUrl = /^https?:\/\//i.test(query);
-      const searchQueries = isUrl
-        ? [query]
-        : [`ytmsearch:${query}`, `ytsearch:${query}`, `scsearch:${query}`];
-      let result = null;
-      let tracks = [];
-      let lastSearchError = null;
-      for (const searchTerm of searchQueries) {
-        try {
-          const candidate = await player.search({ query: searchTerm }, interaction.user);
-          const candidateTracks = Array.isArray(candidate?.tracks)
-            ? candidate.tracks
-            : Array.isArray(candidate?.data)
-              ? candidate.data
-              : Array.isArray(candidate?.data?.tracks)
-                ? candidate.data.tracks
-                : [];
-          console.log(`[Búsqueda] ${searchTerm} | tipo=${candidate?.loadType || 'sin tipo'} | pistas=${candidateTracks.length}`);
-          result = candidate;
-          if (candidateTracks.length) {
-            tracks = candidateTracks;
-            break;
-          }
-          if (candidate?.exception || candidate?.data?.message) {
-            lastSearchError = candidate.exception?.message || candidate.data?.message;
-          }
-        } catch (searchError) {
-          lastSearchError = searchError?.message || String(searchError);
-          console.warn(`[Búsqueda] Falló ${searchTerm}: ${lastSearchError}`);
-        }
-      }
-      if (!tracks.length) {
-        console.error('[Búsqueda] Sin resultados:', JSON.stringify({
-          query,
-          loadType: result?.loadType,
-          resultKeys: result && typeof result === 'object' ? Object.keys(result) : [],
-          lastSearchError,
-        }));
-        throw new Error(lastSearchError
-          ? `Lavalink no pudo encontrar la canción: ${lastSearchError}`
-          : 'Lavalink no devolvió canciones. Prueba con un enlace directo de YouTube o SoundCloud; revisa los logs [Búsqueda] para ver qué fuente respondió.');
-      }
-      const selected = tracks[0];
-      await player.queue.add(selected);
-      if (!player.playing) await player.play();
-      const isPlaying = Boolean(player.queue.current) || player.playing;
-      const embed = new EmbedBuilder()
-        .setColor(0x55aaff)
-        .setTitle(isPlaying ? '🎶 Canción agregada' : '🎶 Agregada a la cola')
-        .setDescription(`[${safe(selected.info?.title || 'Canción')}](${selected.info?.uri || query})`)
-        .addFields(
-          { name: 'Duración', value: formatTime(selected.info?.duration), inline: true },
-          { name: 'Solicitada por', value: interaction.user.toString(), inline: true },
-          { name: 'En cola', value: String(player.queue.tracks.length), inline: true },
-        );
-      if (selected.info?.artworkUrl) embed.setThumbnail(selected.info.artworkUrl);
-      await interaction.editReply({ embeds: [embed] });
-      return;
-    }
-
-    if (command === 'join' || command === 'entrar') {
-      await interaction.deferReply({ ephemeral: true });
-      if (!nodeConnected) throw new Error('El motor de música aún está conectando. Espera unos segundos y vuelve a intentarlo.');
-      const joinedPlayer = await getOrCreatePlayer(interaction);
-      await respond(interaction, `✅ Ya entré a <#${joinedPlayer.voiceChannelId}>.`, true);
-      return;
-    }
-
-    const player = getPlayer(interaction.guildId);
-    if (command === 'leave' || command === 'salir') {
-      if (player) await player.destroy(`Comando /${command}`, true);
-      await respond(interaction, '👋 Me desconecté del canal de voz.', true);
-      return;
->>>>>>> 1baab75febe6410a312505620d726ee122916102
     }
     return resolveDirectUrl(q);
   }
@@ -414,7 +302,6 @@ function stopAudioProcesses() {
   if(p?.cleanup) p.cleanup();
 }
 
-<<<<<<< HEAD
 async function startNext() {
   if (processing || !queue.length) {
     if (!queue.length && !processing && player.state.status === AudioPlayerStatus.Idle) currentTrack = null;
@@ -423,10 +310,6 @@ async function startNext() {
   processing = true;
   const track = queue.shift();
   currentTrack = track;
-=======
-client.once('clientReady', async () => {
-  console.log(`[Discord] Conectado como ${client.user.tag}`);
->>>>>>> 1baab75febe6410a312505620d726ee122916102
   try {
     const stream = createYtDlpAudio(track);
     const resource = createAudioResource(stream.stream, {
