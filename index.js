@@ -8,10 +8,11 @@ const {
   ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle
 } = require('discord.js');
 const {
-  joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState,
+  joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState, EndBehaviorType,
   createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, StreamType
 } = require('@discordjs/voice');
 const FFMPEG_PATH = require('ffmpeg-static');
+const prism = require('prism-media');
 const YTDLP_PATH = path.join(__dirname, 'bin', process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 let activeAudioProcesses = null;
 
@@ -33,6 +34,100 @@ const MAX_QUEUE = 200;
 const pendingSearches = new Map();
 const SEARCH_TIMEOUT_MS = 45000;
 const STREAM_TIMEOUT_MS = 25000;
+
+const RECORDINGS_DIR = path.join(__dirname, 'recordings');
+fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
+let activeRecording = null;
+const recordings = new Map();
+function safeFileName(name) { return path.basename(String(name || '')).replace(/[^a-zA-Z0-9._-]/g, '_'); }
+function runFfmpeg(args, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('FFmpeg agotó el tiempo de espera.')); }, timeoutMs);
+    child.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 10000) stderr = stderr.slice(-10000); });
+    child.on('error', e => { clearTimeout(timer); reject(e); });
+    child.on('close', code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`FFmpeg falló: ${stderr.split('\n').slice(-3).join(' ').slice(0,500)}`)); });
+  });
+}
+function recordingPublic(r) { return { id:r.id, name:r.name, type:r.type, duration:r.duration, size:r.size, createdAt:r.createdAt, url:`/api/recordings/file/${encodeURIComponent(r.name)}` }; }
+async function finishRecording(session, reason) {
+  if (!session || session.finished) return;
+  session.finished = true;
+  if (session.timer) clearTimeout(session.timer);
+  if (session.receiver && session.speakingHandler) session.receiver.speaking.off('start', session.speakingHandler);
+  for (const sub of session.subscriptions.values()) { try { sub.destroy(); } catch {} }
+  const elapsed = Math.max(1, Math.round((Date.now() - session.startedAt) / 1000));
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  const base = path.join(RECORDINGS_DIR, `recording-${id}`);
+  const wavs = [];
+  try {
+    for (const [userId, data] of session.users) {
+      try { data.decoder.end(); } catch {}
+      try { data.stream.end(); } catch {}
+      await new Promise(resolve => data.stream.once('close', resolve));
+      if (!data.bytes) { try { fs.unlinkSync(data.pcm); } catch {} ; continue; }
+      const wav = `${base}-${userId}.wav`;
+      await runFfmpeg(['-y','-f','s16le','-ar','48000','-ac','2','-i',data.pcm,wav]);
+      wavs.push(wav);
+      try { fs.unlinkSync(data.pcm); } catch {}
+    }
+    if (!wavs.length) throw new Error('No se recibió voz durante la grabación.');
+    const mixedWav = `${base}.wav`;
+    if (wavs.length === 1) fs.renameSync(wavs[0], mixedWav);
+    else {
+      const inputs = wavs.flatMap(w => ['-i', w]);
+      const labels = wavs.map((_,i)=>`[${i}:a]`).join('');
+      await runFfmpeg(['-y', ...inputs, '-filter_complex', `${labels}amix=inputs=${wavs.length}:duration=longest:normalize=0[m]`, '-map','[m]','-c:a','pcm_s16le',mixedWav]);
+      wavs.forEach(w => { try { fs.unlinkSync(w); } catch {} });
+    }
+    const ext = session.type === 'clip' ? 'mp4' : 'mp3';
+    const finalPath = `${base}.${ext}`;
+    if (session.type === 'clip') {
+      await runFfmpeg(['-y','-f','lavfi','-i','color=c=0x0a0b12:s=1280x720:r=30','-i',mixedWav,'-c:v','libx264','-tune','stillimage','-c:a','aac','-b:a','192k','-shortest','-pix_fmt','yuv420p',finalPath],180000);
+    } else {
+      await runFfmpeg(['-y','-i',mixedWav,'-codec:a','libmp3lame','-b:a','192k',finalPath]);
+    }
+    try { fs.unlinkSync(mixedWav); } catch {}
+    const stat = fs.statSync(finalPath);
+    const item = { id, name:path.basename(finalPath), type:session.type, duration:elapsed, size:stat.size, createdAt:new Date().toISOString() };
+    recordings.set(item.name,item);
+    console.log(`🎙️ Grabación terminada (${session.type}) · ${item.name} · ${elapsed}s · motivo=${reason}`);
+  } catch (e) {
+    console.error('Error al finalizar grabación:', e.message);
+    try { fs.rmSync(base, {force:true}); } catch {}
+    throw e;
+  } finally { activeRecording = null; }
+}
+async function startRecording(channel, type) {
+  if (activeRecording) throw new Error('Ya hay una grabación activa. Usa /grabar accion:detener primero.');
+  const conn = getConnection();
+  if (!conn || conn.joinConfig.channelId !== channel.id) throw new Error('El bot debe estar en tu mismo canal de voz. Usa /entrar primero.');
+  const receiver = conn.receiver;
+  const session = { channel, type, startedAt:Date.now(), users:new Map(), subscriptions:new Map(), finished:false, timer:null, receiver:null, speakingHandler:null };
+  const subscribeUser = (userId) => {
+    if (session.users.has(userId) || userId === client.user.id) return;
+    const member = channel.guild.members.cache.get(userId);
+    if (!member || member.voice.channelId !== channel.id || member.user.bot) return;
+    const pcm = path.join(RECORDINGS_DIR, `.tmp-${Date.now()}-${userId}.pcm`);
+    const stream = fs.createWriteStream(pcm);
+    const decoder = new prism.opus.Decoder({ rate:48000, channels:2, frameSize:960 });
+    const data = { pcm, stream, decoder, bytes:0 };
+    decoder.on('data', chunk => { data.bytes += chunk.length; });
+    const sub = receiver.subscribe(userId, { end:{ behavior:EndBehaviorType.AfterSilence, duration:1000 } });
+    sub.pipe(decoder).pipe(stream);
+    session.users.set(userId,data);
+    session.subscriptions.set(userId,sub);
+    sub.on('end',()=>session.subscriptions.delete(userId));
+  };
+  session.receiver = receiver;
+  session.speakingHandler = subscribeUser;
+  receiver.speaking.on('start', subscribeUser);
+  for (const [id, member] of channel.members) if (!member.user.bot) subscribeUser(id);
+  activeRecording = session;
+  console.log(`🎙️ Grabación iniciada: ${type} · duración indefinida · #${channel.name}`);
+}
+
 
 function timeout(promise, ms, message) {
   let timer;
@@ -63,7 +158,7 @@ async function connectToVoice(channel, guild) {
       channelId: channel.id,
       guildId: guild.id,
       adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: true,
+      selfDeaf: false,
       selfMute: false,
       debug: false
     });
@@ -385,7 +480,11 @@ const commands = [
   { name: 'volumen', description: 'Ajusta el volumen del bot (0 a 100)', options: [{ name: 'nivel', description: 'Porcentaje de volumen', type: 4, required: true, min_value: 0, max_value: 100 }] },
   { name: 'quitar', description: 'Quita una canción de la cola', options: [{ name: 'posicion', description: 'Número de la canción en la cola', type: 4, required: true, min_value: 1, max_value: 200 }] },
   { name: 'limpiar', description: 'Vacía la cola sin detener la canción actual' },
-  { name: 'autoplay', description: 'Activa o desactiva la reproducción automática', options: [{ name: 'activo', description: 'Activar autoplay', type: 5, required: true }] }
+  { name: 'autoplay', description: 'Activa o desactiva la reproducción automática', options: [{ name: 'activo', description: 'Activar autoplay', type: 5, required: true }] },
+  { name: 'grabar', description: 'Graba el canal de voz en audio o clip MP4', options: [
+    { name: 'accion', description: 'Iniciar o detener', type: 3, required: true, choices: [{name:'Iniciar',value:'iniciar'},{name:'Detener',value:'detener'}] },
+    { name: 'tipo', description: 'Audio MP3 o Clip MP4', type: 3, required: false, choices: [{name:'Audio MP3',value:'audio'},{name:'Clip MP4',value:'clip'}] },
+  ] }
 ];
 async function registerCommands() { const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN); await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands }); console.log('Comandos slash registrados.'); }
 
@@ -394,6 +493,23 @@ app.get('/styles.css', (_req,res) => res.sendFile(path.join(__dirname, 'styles.c
 app.get('/app.js', (_req,res) => res.sendFile(path.join(__dirname, 'app.js')));
 app.get('/health', (_req,res) => res.status(200).json({ status: 'ok' }));
 app.get('/api/status', requireApi, (_req,res) => { const c = getConnection(); res.json({ online: client.isReady(), bot: client.user ? { id: client.user.id, username: client.user.username } : null, voice: c ? c.state.status : 'disconnected', playing: Boolean(currentTrack), paused: player.state.status === AudioPlayerStatus.Paused, lastError }); });
+app.get('/api/recordings', requireApi, (_req,res) => {
+  const files = fs.readdirSync(RECORDINGS_DIR).filter(n => /\.(mp3|mp4)$/i.test(n)).map(n => recordings.get(n) || (() => { const st=fs.statSync(path.join(RECORDINGS_DIR,n)); return {id:n,name:n,type:/\.mp4$/i.test(n)?'clip':'audio',duration:null,size:st.size,createdAt:st.mtime.toISOString()}; })()).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  res.json({recordings:files.map(recordingPublic)});
+});
+app.get('/api/recordings/file/:name', requireApi, (req,res) => {
+  const name=safeFileName(decodeURIComponent(req.params.name));
+  if(!/\.(mp3|mp4)$/i.test(name)) return res.status(400).json({error:'Archivo inválido.'});
+  const file=path.join(RECORDINGS_DIR,name);
+  if(!fs.existsSync(file)) return res.status(404).json({error:'Grabación no encontrada.'});
+  res.sendFile(file);
+});
+app.delete('/api/recordings/:name', requireApi, (req,res) => {
+  const name=safeFileName(decodeURIComponent(req.params.name));
+  const file=path.join(RECORDINGS_DIR,name);
+  if(!fs.existsSync(file)) return res.status(404).json({error:'Grabación no encontrada.'});
+  fs.unlinkSync(file); recordings.delete(name); res.json({ok:true});
+});
 app.get('/api/music/queue', requireApi, (_req,res) => res.json(snapshot()));
 app.post('/api/music/shuffle', requireApi, (_req,res) => { for (let i=queue.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1)); [queue[i],queue[j]]=[queue[j],queue[i]]; } res.json({ok:true,...snapshot()}); });
 app.post('/api/music/repeat', requireApi, (req,res) => { const mode=String(req.body?.mode||'off'); if(!['off','track','queue'].includes(mode)) return res.status(400).json({error:'Modo inválido. Usa off, track o queue.'}); repeatMode=mode; res.json({ok:true,repeatMode}); });
@@ -486,6 +602,19 @@ client.on('interactionCreate', async i => {
     if (i.commandName === 'quitar') { const pos=i.options.getInteger('posicion',true)-1; if(pos<0||pos>=queue.length) return i.editReply('No existe una canción en esa posición. Usa /cola para ver los números.'); const [removed]=queue.splice(pos,1); return i.editReply(`🗑️ Quité **${removed.title}** de la cola.`); }
     if (i.commandName === 'limpiar') { const removed=queue.length; queue=[]; return i.editReply(`🧹 Cola vaciada. Se quitaron ${removed} canciones; la actual sigue sonando.`); }
     if (i.commandName === 'autoplay') { autoplayEnabled=i.options.getBoolean('activo',true); return i.editReply(`♾️ Autoplay ${autoplayEnabled?'activado':'desactivado'}.`); }
+    if (i.commandName === 'grabar') {
+      const accion=i.options.getString('accion',true);
+      if (accion==='detener') {
+        if(!activeRecording) return i.editReply('⏹️ No hay ninguna grabación activa.');
+        try { await finishRecording(activeRecording,'manual'); return i.editReply('⏹️ Grabación detenida y guardada en el panel web.'); }
+        catch(e) { return i.editReply(`❌ ${e.message}`); }
+      }
+      const member=await guild.members.fetch(i.user.id);
+      if(!member.voice.channel) return i.editReply('Entra primero a un canal de voz.');
+      const type=i.options.getString('tipo')||'audio';
+      await startRecording(member.voice.channel,type);
+      return i.editReply(`🔴 **Grabando ${type==='clip'?'CLIP MP4':'AUDIO MP3'}** en **${member.voice.channel.name}** · **duración indefinida**. Usa **/grabar accion:detener** cuando quieras terminar.`);
+    }
   } catch(e) { console.error('Comando falló:',e); lastError=e.message; const message=`❌ ${e.message || 'Ocurrió un error. Revisa los logs de Render.'}`; if(i.deferred||i.replied) await i.editReply({content:message,components:[]}).catch(()=>{}); else await i.reply({content:message,ephemeral:true}).catch(()=>{}); }
 });
 const server=app.listen(process.env.PORT||10000,'0.0.0.0',()=>console.log('API escuchando.'));
